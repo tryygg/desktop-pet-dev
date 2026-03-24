@@ -12,7 +12,7 @@ public class TransparentWindow : MonoBehaviour
     public static TransparentWindow Instance { get; private set; }
 
     [Header("Window")]
-    public Vector2Int initialWindowSize = new Vector2Int(520, 620);
+    public Vector2Int initialWindowSize = new Vector2Int(960, 960);
     public bool forceWindowedModeOnStart = true;
     public bool keepTopMost = true;
     public bool hideFromAltTab = true;

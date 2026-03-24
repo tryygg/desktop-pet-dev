@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 [DisallowMultipleComponent]
@@ -11,6 +12,7 @@ public class DesktopPetController : MonoBehaviour
     public Transform visualRoot;
     public TransparentWindow windowController;
     public Camera petCamera;
+    public Canvas sceneUiCanvas;
 
     [Header("Animation")]
     public string initialStateName = "\u6c89\u601d";
@@ -55,6 +57,29 @@ public class DesktopPetController : MonoBehaviour
     public int idleFrameRate = 60;
     public int activeFrameRate = 60;
 
+    [Header("Chat")]
+    public Vector2 chatDockSize = new Vector2(304f, 92f);
+    public Vector2 chatPanelSize = new Vector2(292f, 236f);
+    public Vector2 chatBubbleMaxSize = new Vector2(272f, 132f);
+    public float chatAnimationHoldDuration = 1.35f;
+    public float chatBubbleDuration = 3.25f;
+    public Sprite chatBubbleBodySpriteOverride;
+    [TextArea(2, 4)]
+    public string defaultGreeting = "\u4f60\u597d\u5440\uff0c\u6211\u73b0\u5728\u8fd8\u6ca1\u63a5\u5165\u5927\u6a21\u578b\uff0c\u4f46\u5df2\u7ecf\u53ef\u4ee5\u966a\u4f60\u804a\u804a\u5929\u5566\u3002";
+    public string[] localChatReplies =
+    {
+        "\u6211\u5728\u8ba4\u771f\u542c\u4f60\u8bf4\u5462\u3002",
+        "\u8fd9\u53e5\u8bdd\u6211\u6536\u5230\u5566\uff0c\u6211\u5f88\u5f00\u5fc3\u3002",
+        "\u542c\u8d77\u6765\u633a\u6709\u610f\u601d\u7684\uff0c\u6211\u60f3\u7ee7\u7eed\u966a\u4f60\u804a\u3002",
+        "\u597d\u5440\uff0c\u6211\u4f1a\u8bb0\u4f4f\u4f60\u521a\u624d\u8bf4\u7684\u8bdd\u3002"
+    };
+    public string[] chatAnimationStateNames =
+    {
+        "\u8bf4\u8bdd1",
+        "\u8bf4\u8bdd2",
+        "\u8bf4\u8bdd3"
+    };
+
     [Header("Menu Look")]
     public Vector2 menuPadding = new Vector2(12f, 12f);
     public float menuWidth = 176f;
@@ -81,32 +106,92 @@ public class DesktopPetController : MonoBehaviour
     private float currentScale = 1f;
 
     private bool menuOpen;
+    private bool chatPanelOpen;
+    private bool chatHistoryOpen;
+    private bool chatBubbleVisible;
     private bool cursorInsideWindow;
     private bool cursorOverPet;
     private bool cursorOverMenu;
+    private bool cursorOverChat;
+    private bool cursorOverHistory;
     private bool previousLeftDown;
     private bool previousRightDown;
     private int hoveredMenuIndex = -1;
     private string currentStateName = string.Empty;
 
     private Rect menuRect;
+    private Rect chatPanelRect;
+    private Rect historyPanelRect;
+    private Rect chatBubbleRect;
     private Vector2 clientCursorPosition;
     private Vector2 guiCursorPosition;
     private Vector2Int dragOffset;
+    private Vector2 chatPanelDragOffset;
+    private Vector2 historyPanelDragOffset;
+    private bool draggingChatPanel;
+    private bool draggingHistoryPanel;
+    private bool chatPanelManuallyPositioned;
+    private bool historyPanelManuallyPositioned;
+    private bool scrollHistoryToBottomPending;
+    private bool hasCachedPetClientRect;
 
     private Canvas runtimeMenuCanvas;
     private RectTransform runtimeMenuRoot;
+    private RectTransform runtimeMenuItemsRoot;
+    private RectTransform runtimeChatPanelRoot;
+    private RectTransform runtimeChatHistoryPanelRoot;
+    private RectTransform runtimeChatBubbleRoot;
+    private RectTransform runtimeChatBubbleBodyRoot;
+    private RectTransform runtimeChatBubbleTailRoot;
     private Text runtimeMenuHeader;
+    private Text runtimeChatHeader;
+    private Text runtimeChatHistoryHeader;
+    private Text runtimeChatHistoryText;
+    private Text runtimeChatBubbleText;
+    private InputField runtimeChatInputField;
+    private ScrollRect runtimeChatHistoryScrollRect;
     private readonly List<Image> runtimeMenuItemBackgrounds = new List<Image>();
+    private readonly List<string> chatHistory = new List<string>();
+    private RectInt cachedPetClientRect;
+    private string cachedChatHistoryText = string.Empty;
+    private bool chatHistoryDirty = true;
+    private Image runtimeChatMenuBackground;
     private Image runtimeExitBackground;
+    private Image runtimeChatPanelBackground;
+    private Image runtimeChatHistoryPanelBackground;
+    private Image runtimeChatBubbleBackground;
+    private Image runtimeChatBubbleTailBackground;
+    private Sprite runtimeChatBubbleBodySprite;
+    private Sprite runtimeChatBubbleTailSprite;
+    private Texture2D runtimeChatBubbleProcessedTexture;
+    private Button runtimeChatSendButton;
+    private Button runtimeChatCloseButton;
+    private Button runtimeChatHistoryButton;
+    private Button runtimeChatHistoryCloseButton;
     private Font runtimeFont;
     private Texture2D regionMaskTexture;
     private Coroutine regionMaskRoutine;
+    private Coroutine chatAnimationRoutine;
+    private Coroutine chatBubbleRoutine;
     private WaitForEndOfFrame endOfFrameYield;
     private float nextMaskUpdateTime;
+    private GameObject runtimeEventSystemObject;
+    private bool ownsSceneUiCanvas;
+    private bool ownsRuntimeEventSystem;
+    private const int BubbleAlphaCutoff = 200;
+    private const float BubbleSideInsetRatio = 0.16f;
+    private const float BubbleTopInsetRatio = 0.16f;
+    private const float BubbleBottomInsetRatio = 112f / 430f;
 
     private const string ExitMenuLabel = "\u9000\u51fa";
     private const string MenuHeaderLabel = "\u52a8\u753b\u5207\u6362";
+    private const string ChatMenuLabel = "\u5bf9\u8bdd";
+    private const string ChatHeaderLabel = "\u804a\u5929";
+    private const string ChatInputPlaceholderLabel = "\u8f93\u5165\u4f60\u60f3\u8bf4\u7684\u8bdd...";
+    private const string ChatSendLabel = "\u53d1\u9001";
+    private const string ChatCloseLabel = "\u5173\u95ed";
+    private const string ChatHistoryLabel = "\u5386\u53f2";
+    private const string ChatHistoryHeaderLabel = "\u5bf9\u8bdd\u8bb0\u5f55";
     private void Awake()
     {
         DisablePreviewControls();
@@ -114,9 +199,25 @@ public class DesktopPetController : MonoBehaviour
         endOfFrameYield = new WaitForEndOfFrame();
     }
 
+    private void OnValidate()
+    {
+        if (Application.isPlaying)
+        {
+            return;
+        }
+
+        ResolveReferences();
+        RebuildMenuStateList();
+        EnsureRuntimeMenu();
+        EnsureRuntimeChatPanel();
+        RebuildRuntimeMenuItems();
+        RefreshRuntimeCanvasVisibility();
+    }
+
     private IEnumerator Start()
     {
         ResolveReferences();
+        EnsureRuntimeMenu();
         DisablePreviewControls();
         CacheCharacterData();
         EnsureCharacterCollider();
@@ -166,11 +267,18 @@ public class DesktopPetController : MonoBehaviour
 
         UpdateCursorState();
         UpdateScaleInput();
+        UpdateChatKeyboardInput();
 
         bool leftDown = windowController.IsPrimaryButtonDown();
         bool rightDown = windowController.IsSecondaryButtonDown();
 
-        bool keepInteractive = interactionMode == InteractionMode.Dragging || menuOpen || cursorOverPet;
+        bool keepInteractive = interactionMode == InteractionMode.Dragging ||
+                               menuOpen ||
+                               draggingChatPanel ||
+                               draggingHistoryPanel ||
+                               cursorOverPet ||
+                               cursorOverChat ||
+                               cursorOverHistory;
         windowController.SetClickThrough(!keepInteractive && windowController.clickThroughOnEmptyArea);
 
         if (menuOpen)
@@ -178,16 +286,40 @@ public class DesktopPetController : MonoBehaviour
             UpdateMenuInteraction(leftDown, rightDown);
             UpdateRuntimeMenuVisuals();
         }
+        else if (draggingHistoryPanel)
+        {
+            UpdateHistoryPanelDragging(leftDown);
+        }
+        else if (draggingChatPanel)
+        {
+            UpdateChatPanelDragging(leftDown);
+        }
         else if (interactionMode == InteractionMode.Dragging)
         {
             UpdateDragging(leftDown);
+        }
+        else if (chatPanelOpen || chatHistoryOpen)
+        {
+            UpdateChatPanelInteraction(leftDown);
         }
         else
         {
             UpdatePassiveInteraction(leftDown, rightDown);
         }
 
-        keepInteractive = interactionMode == InteractionMode.Dragging || menuOpen || cursorOverPet || cursorOverMenu;
+        if (chatPanelOpen || chatHistoryOpen || chatBubbleVisible)
+        {
+            UpdateRuntimeChatVisuals();
+        }
+
+        keepInteractive = interactionMode == InteractionMode.Dragging ||
+                          menuOpen ||
+                          draggingChatPanel ||
+                          draggingHistoryPanel ||
+                          cursorOverPet ||
+                          cursorOverMenu ||
+                          cursorOverChat ||
+                          cursorOverHistory;
         windowController.SetClickThrough(!keepInteractive && windowController.clickThroughOnEmptyArea);
         Application.targetFrameRate = keepInteractive ? activeFrameRate : idleFrameRate;
 
@@ -221,6 +353,11 @@ public class DesktopPetController : MonoBehaviour
         {
             windowController = GetComponent<TransparentWindow>();
         }
+
+        if (sceneUiCanvas == null)
+        {
+            sceneUiCanvas = GetComponentInChildren<Canvas>(true);
+        }
     }
 
     private void DisablePreviewControls()
@@ -248,7 +385,7 @@ public class DesktopPetController : MonoBehaviour
 
     private void UpdateScaleInput()
     {
-        if (!cursorInsideWindow || cursorOverMenu)
+        if (!cursorInsideWindow || cursorOverMenu || chatPanelOpen || chatHistoryOpen)
         {
             return;
         }
@@ -284,7 +421,7 @@ public class DesktopPetController : MonoBehaviour
         CacheCharacterData();
         EnsureCharacterCollider();
 
-        if (autoFitWindowToPet && windowController != null && windowController.IsReady && !menuOpen)
+        if (autoFitWindowToPet && windowController != null && windowController.IsReady && !menuOpen && !chatPanelOpen)
         {
             CropWindowToCharacter();
         }
@@ -295,6 +432,8 @@ public class DesktopPetController : MonoBehaviour
         cursorInsideWindow = false;
         cursorOverPet = false;
         cursorOverMenu = false;
+        cursorOverChat = false;
+        cursorOverHistory = false;
         hoveredMenuIndex = -1;
 
         if (windowController == null || !windowController.TryGetCursorClientPosition(out clientCursorPosition, out cursorInsideWindow))
@@ -310,6 +449,16 @@ public class DesktopPetController : MonoBehaviour
         {
             cursorOverMenu = true;
             hoveredMenuIndex = GetMenuIndexAt(guiCursorPosition);
+        }
+
+        if (chatPanelOpen && cursorInsideWindow && chatPanelRect.Contains(guiCursorPosition))
+        {
+            cursorOverChat = true;
+        }
+
+        if (chatHistoryOpen && cursorInsideWindow && historyPanelRect.Contains(guiCursorPosition))
+        {
+            cursorOverHistory = true;
         }
 
         if (cursorInsideWindow)
@@ -329,6 +478,38 @@ public class DesktopPetController : MonoBehaviour
         if (cursorOverPet && leftDown && !previousLeftDown)
         {
             BeginDragging();
+        }
+    }
+
+    private void UpdateChatKeyboardInput()
+    {
+        if (!chatPanelOpen || runtimeChatInputField == null || !runtimeChatInputField.isFocused)
+        {
+            return;
+        }
+
+        if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+        {
+            SubmitChatMessage();
+        }
+    }
+
+    private void UpdateChatPanelInteraction(bool leftDown)
+    {
+        if (!leftDown || previousLeftDown)
+        {
+            return;
+        }
+
+        if (chatHistoryOpen && cursorOverHistory && GetHistoryPanelDragRect().Contains(guiCursorPosition))
+        {
+            BeginHistoryPanelDrag();
+            return;
+        }
+
+        if (chatPanelOpen && cursorOverChat && GetChatPanelDragRect().Contains(guiCursorPosition))
+        {
+            BeginChatPanelDrag();
         }
     }
 
@@ -366,6 +547,67 @@ public class DesktopPetController : MonoBehaviour
         Vector2Int clampedPosition = ClampToWorkingArea(targetPosition);
 
         windowController.MoveVisibleWindowTo(clampedPosition.x, clampedPosition.y);
+    }
+
+    private void BeginChatPanelDrag()
+    {
+        chatPanelManuallyPositioned = true;
+        draggingChatPanel = true;
+        draggingHistoryPanel = false;
+        chatPanelDragOffset = guiCursorPosition - new Vector2(chatPanelRect.x, chatPanelRect.y);
+        windowController.SetClickThrough(false);
+    }
+
+    private void UpdateChatPanelDragging(bool leftDown)
+    {
+        if (!leftDown)
+        {
+            draggingChatPanel = false;
+            ExpandWindowRegionForChatUI();
+            return;
+        }
+
+        chatPanelRect = ClampFloatingRect(new Rect(
+            guiCursorPosition.x - chatPanelDragOffset.x,
+            guiCursorPosition.y - chatPanelDragOffset.y,
+            chatPanelRect.width,
+            chatPanelRect.height));
+
+        if (chatHistoryOpen && !historyPanelManuallyPositioned)
+        {
+            historyPanelRect = BuildHistoryPanelRect();
+        }
+
+        UpdateRuntimeChatVisuals();
+        ExpandWindowRegionForChatUI();
+    }
+
+    private void BeginHistoryPanelDrag()
+    {
+        historyPanelManuallyPositioned = true;
+        draggingHistoryPanel = true;
+        draggingChatPanel = false;
+        historyPanelDragOffset = guiCursorPosition - new Vector2(historyPanelRect.x, historyPanelRect.y);
+        windowController.SetClickThrough(false);
+    }
+
+    private void UpdateHistoryPanelDragging(bool leftDown)
+    {
+        if (!leftDown)
+        {
+            draggingHistoryPanel = false;
+            ExpandWindowRegionForChatUI();
+            return;
+        }
+
+        historyPanelRect = ClampFloatingRect(new Rect(
+            guiCursorPosition.x - historyPanelDragOffset.x,
+            guiCursorPosition.y - historyPanelDragOffset.y,
+            historyPanelRect.width,
+            historyPanelRect.height));
+
+        UpdateRuntimeChatVisuals();
+        ExpandWindowRegionForChatUI();
     }
 
     private void FinishDragging()
@@ -411,7 +653,14 @@ public class DesktopPetController : MonoBehaviour
             return;
         }
 
-        if (cursorOverMenu && hoveredMenuIndex == availableMenuStates.Count)
+        if (cursorOverMenu && hoveredMenuIndex == GetChatMenuIndex())
+        {
+            CloseContextMenu();
+            OpenChatPanel();
+            return;
+        }
+
+        if (cursorOverMenu && hoveredMenuIndex == GetExitMenuIndex())
         {
             RequestQuit();
             return;
@@ -428,11 +677,6 @@ public class DesktopPetController : MonoBehaviour
     private void OpenContextMenu()
     {
         RebuildMenuStateList();
-        if (availableMenuStates.Count == 0)
-        {
-            return;
-        }
-
         StopSnapRoutine();
 
         menuOpen = true;
@@ -450,7 +694,7 @@ public class DesktopPetController : MonoBehaviour
         hoveredMenuIndex = -1;
         HideRuntimeMenu();
 
-        if (autoFitWindowToPet && windowController != null && windowController.IsReady)
+        if (autoFitWindowToPet && windowController != null && windowController.IsReady && !chatPanelOpen)
         {
             CropWindowToCharacter();
         }
@@ -524,6 +768,30 @@ public class DesktopPetController : MonoBehaviour
         }
 
         return false;
+    }
+
+    public bool TryPlayRandomAvailableState(string[] stateNames, float fadeDuration = -1f)
+    {
+        if (stateNames == null || stateNames.Length == 0)
+        {
+            return false;
+        }
+
+        List<string> candidates = new List<string>();
+        for (int i = 0; i < stateNames.Length; i++)
+        {
+            if (!string.IsNullOrEmpty(stateNames[i]) && HasAnimatorState(stateNames[i]))
+            {
+                candidates.Add(stateNames[i]);
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            return false;
+        }
+
+        return TryPlayAnimationState(candidates[Random.Range(0, candidates.Count)], fadeDuration);
     }
 
     private bool PlayState(string stateName, float fadeDuration)
@@ -711,7 +979,14 @@ public class DesktopPetController : MonoBehaviour
 
     private void MoveToTaskbarCenter()
     {
-        GetWindowLimits(out int left, out int top, out int right, out int bottom);
+        Vector2Int visibleSize = windowController.VisibleWindowSize.x > 0 && windowController.VisibleWindowSize.y > 0
+            ? windowController.VisibleWindowSize
+            : windowController.WindowSize;
+
+        int left = 0;
+        int top = 0;
+        int right = Mathf.Max(0, Display.main.systemWidth - visibleSize.x);
+        int bottom = Mathf.Max(0, Display.main.systemHeight - visibleSize.y);
         int centeredX = left + Mathf.Max(0, (right - left) / 2);
         windowController.MoveVisibleWindowTo(centeredX, bottom);
     }
@@ -857,6 +1132,7 @@ public class DesktopPetController : MonoBehaviour
                windowController != null &&
                windowController.IsReady &&
                !menuOpen &&
+               !chatPanelOpen &&
                interactionMode != InteractionMode.Dragging &&
                !cursorOverMenu &&
                Application.isPlaying;
@@ -999,14 +1275,23 @@ public class DesktopPetController : MonoBehaviour
 
     private Rect BuildMenuRect(Vector2 guiCursor)
     {
-        float menuHeight = menuPadding.y * 2f + menuHeaderHeight + availableMenuStates.Count * menuItemHeight;
-        menuHeight += menuItemHeight;
+        float menuHeight = menuPadding.y * 2f + menuHeaderHeight + (availableMenuStates.Count + 2) * menuItemHeight;
         float maxX = Mathf.Max(8f, windowController.WindowSize.x - menuWidth - 8f);
         float maxY = Mathf.Max(8f, windowController.WindowSize.y - menuHeight - 8f);
 
         float x = Mathf.Clamp(guiCursor.x + 12f, 8f, maxX);
         float y = Mathf.Clamp(guiCursor.y + 12f, 8f, maxY);
         return new Rect(x, y, menuWidth, menuHeight);
+    }
+
+    private int GetChatMenuIndex()
+    {
+        return availableMenuStates.Count;
+    }
+
+    private int GetExitMenuIndex()
+    {
+        return availableMenuStates.Count + 1;
     }
 
     private int GetMenuIndexAt(Vector2 guiPosition)
@@ -1019,9 +1304,14 @@ public class DesktopPetController : MonoBehaviour
             }
         }
 
+        if (GetChatItemRect().Contains(guiPosition))
+        {
+            return GetChatMenuIndex();
+        }
+
         if (GetExitItemRect().Contains(guiPosition))
         {
-            return availableMenuStates.Count;
+            return GetExitMenuIndex();
         }
 
         return -1;
@@ -1038,7 +1328,196 @@ public class DesktopPetController : MonoBehaviour
 
     private Rect GetExitItemRect()
     {
-        return GetMenuItemRect(availableMenuStates.Count);
+        return GetMenuItemRect(GetExitMenuIndex());
+    }
+
+    private Rect GetChatItemRect()
+    {
+        return GetMenuItemRect(GetChatMenuIndex());
+    }
+
+    private Rect BuildChatPanelRect()
+    {
+        float width = Mathf.Clamp(chatDockSize.x, 240f, Mathf.Max(240f, windowController.WindowSize.x - 16f));
+        float height = Mathf.Clamp(chatDockSize.y, 74f, Mathf.Max(74f, windowController.WindowSize.y - 16f));
+        RectInt petRect = GetPetClientRectOrFallback();
+
+        Rect panelRect = new Rect(
+            petRect.center.x - width * 0.5f,
+            petRect.yMax + 12f,
+            width,
+            height);
+
+        return ClampFloatingRect(panelRect);
+    }
+
+    private Rect BuildHistoryPanelRect()
+    {
+        float width = Mathf.Clamp(chatPanelSize.x, 240f, Mathf.Max(240f, windowController.WindowSize.x - 16f));
+        float height = Mathf.Clamp(chatPanelSize.y, 180f, Mathf.Max(180f, windowController.WindowSize.y - 16f));
+        const float gap = 12f;
+        const float padding = 8f;
+
+        float maxX = Mathf.Max(padding, windowController.WindowSize.x - width - padding);
+        float maxY = Mathf.Max(padding, windowController.WindowSize.y - height - padding);
+
+        float rightX = chatPanelRect.xMax + gap;
+        float leftX = chatPanelRect.x - width - gap;
+        float topY = chatPanelRect.y - height - gap;
+
+        Rect panelRect;
+        if (rightX <= maxX)
+        {
+            panelRect = new Rect(rightX, Mathf.Clamp(chatPanelRect.y, padding, maxY), width, height);
+        }
+        else if (leftX >= padding)
+        {
+            panelRect = new Rect(leftX, Mathf.Clamp(chatPanelRect.y, padding, maxY), width, height);
+        }
+        else
+        {
+            panelRect = new Rect(
+                Mathf.Clamp(chatPanelRect.center.x - width * 0.5f, padding, maxX),
+                Mathf.Clamp(topY, padding, maxY),
+                width,
+                height);
+        }
+
+        return ClampFloatingRect(panelRect);
+    }
+
+    private Rect BuildChatBubbleRect()
+    {
+        RectInt petRect = GetPetClientRectOrFallback();
+        Sprite bubbleSprite = chatBubbleBodySpriteOverride != null ? chatBubbleBodySpriteOverride : runtimeChatBubbleBodySprite;
+        float bubbleWidth = Mathf.Clamp(chatBubbleMaxSize.x, 164f, Mathf.Max(164f, windowController.WindowSize.x - 16f));
+        float bubbleHeight = Mathf.Clamp(chatBubbleMaxSize.y, 100f, Mathf.Max(100f, windowController.WindowSize.y - 16f));
+        float spriteAspect = bubbleSprite != null && bubbleSprite.rect.height > 0.01f
+            ? bubbleSprite.rect.width / bubbleSprite.rect.height
+            : 1.8f;
+        bubbleHeight = Mathf.Min(bubbleHeight, bubbleWidth / Mathf.Max(0.1f, spriteAspect));
+
+        Rect panelRect = new Rect(
+            petRect.center.x - bubbleWidth * 0.38f,
+            petRect.y - bubbleHeight - 16f,
+            bubbleWidth,
+            bubbleHeight);
+
+        return ClampFloatingRect(panelRect);
+    }
+
+    private Rect GetChatPanelDragRect()
+    {
+        return new Rect(
+            chatPanelRect.x + 10f,
+            chatPanelRect.y + 8f,
+            Mathf.Max(72f, chatPanelRect.width - 150f),
+            28f);
+    }
+
+    private Rect GetHistoryPanelDragRect()
+    {
+        return new Rect(
+            historyPanelRect.x + 10f,
+            historyPanelRect.y + 8f,
+            Mathf.Max(72f, historyPanelRect.width - 86f),
+            28f);
+    }
+
+    private Rect ClampFloatingRect(Rect rect)
+    {
+        if (windowController == null)
+        {
+            return rect;
+        }
+
+        const float padding = 8f;
+        float maxX = Mathf.Max(padding, windowController.WindowSize.x - rect.width - padding);
+        float maxY = Mathf.Max(padding, windowController.WindowSize.y - rect.height - padding);
+
+        rect.x = Mathf.Clamp(rect.x, padding, maxX);
+        rect.y = Mathf.Clamp(rect.y, padding, maxY);
+        return rect;
+    }
+
+    private bool TryGetPetClientRect(out RectInt petRect)
+    {
+        petRect = default;
+
+        if (windowController == null || !TryGetProjectedBounds(out Rect projectedRect))
+        {
+            return false;
+        }
+
+        Vector2Int fullWindowSize = windowController.WindowSize;
+        if (fullWindowSize.x <= 0 || fullWindowSize.y <= 0)
+        {
+            return false;
+        }
+
+        Vector2Int effectivePadding = new Vector2Int(
+            Mathf.Max(0, Mathf.Min(contentPadding.x, maxAutoFitPadding.x)),
+            Mathf.Max(0, Mathf.Min(contentPadding.y, maxAutoFitPadding.y)));
+
+        int cropWidth = Mathf.Clamp(
+            Mathf.CeilToInt(projectedRect.width) + effectivePadding.x,
+            1,
+            fullWindowSize.x);
+        int cropHeight = Mathf.Clamp(
+            Mathf.CeilToInt(projectedRect.height) + effectivePadding.y,
+            1,
+            fullWindowSize.y);
+
+        int cropLeft = Mathf.FloorToInt(projectedRect.xMin) - effectivePadding.x / 2;
+        int cropBottom = Mathf.FloorToInt(projectedRect.yMin) - effectivePadding.y / 2;
+
+        cropLeft = Mathf.Clamp(cropLeft, 0, Mathf.Max(0, fullWindowSize.x - cropWidth));
+        cropBottom = Mathf.Clamp(cropBottom, 0, Mathf.Max(0, fullWindowSize.y - cropHeight));
+
+        int cropTop = fullWindowSize.y - cropBottom - cropHeight;
+        cropTop = Mathf.Clamp(cropTop, 0, Mathf.Max(0, fullWindowSize.y - cropHeight));
+
+        petRect = new RectInt(cropLeft, cropTop, cropWidth, cropHeight);
+        cachedPetClientRect = petRect;
+        hasCachedPetClientRect = true;
+        return true;
+    }
+
+    private RectInt GetPetClientRectOrFallback()
+    {
+        if (TryGetPetClientRect(out RectInt petRect))
+        {
+            return petRect;
+        }
+
+        if (hasCachedPetClientRect)
+        {
+            return cachedPetClientRect;
+        }
+
+        return windowController != null
+            ? windowController.VisibleContentRect
+            : new RectInt(0, 0, 240, 320);
+    }
+
+    private static RectInt ToClientRect(Rect rect)
+    {
+        return new RectInt(
+            Mathf.FloorToInt(rect.x),
+            Mathf.FloorToInt(rect.y),
+            Mathf.CeilToInt(rect.width),
+            Mathf.CeilToInt(rect.height));
+    }
+
+    private void EnsureVisibleWindowInsideWorkArea()
+    {
+        if (windowController == null || !windowController.IsReady)
+        {
+            return;
+        }
+
+        Vector2Int visiblePosition = ClampToWorkingArea(windowController.GetVisibleWindowPosition());
+        windowController.MoveVisibleWindowTo(visiblePosition.x, visiblePosition.y);
     }
 
     private void ExpandWindowRegionForMenu()
@@ -1048,14 +1527,146 @@ public class DesktopPetController : MonoBehaviour
             return;
         }
 
-        RectInt petRect = windowController.VisibleContentRect;
-        RectInt menuClientRect = new RectInt(
-            Mathf.FloorToInt(menuRect.x),
-            Mathf.FloorToInt(menuRect.y),
-            Mathf.CeilToInt(menuRect.width),
-            Mathf.CeilToInt(menuRect.height));
+        RectInt petRect = GetPetClientRectOrFallback();
+        RectInt menuClientRect = ToClientRect(menuRect);
 
         windowController.SetWindowRegions(petRect, menuClientRect);
+        EnsureVisibleWindowInsideWorkArea();
+    }
+
+    private void ExpandWindowRegionForChatUI()
+    {
+        if (windowController == null)
+        {
+            return;
+        }
+
+        List<RectInt> regions = new List<RectInt>(4)
+        {
+            GetPetClientRectOrFallback()
+        };
+
+        if (chatPanelOpen)
+        {
+            regions.Add(ToClientRect(chatPanelRect));
+        }
+
+        if (chatHistoryOpen)
+        {
+            regions.Add(ToClientRect(historyPanelRect));
+        }
+
+        if (chatBubbleVisible)
+        {
+            regions.Add(ToClientRect(chatBubbleRect));
+        }
+
+        windowController.SetWindowRegions(regions.ToArray());
+        EnsureVisibleWindowInsideWorkArea();
+    }
+
+    private void OpenChatPanel()
+    {
+        EnsureRuntimeChatPanel();
+        bool showGreetingBubble = false;
+
+        if (chatHistory.Count == 0)
+        {
+            AppendChatLine("\u5c0f\u6d63\u718a", defaultGreeting);
+            showGreetingBubble = true;
+        }
+
+        chatPanelOpen = true;
+        chatHistoryOpen = false;
+        chatPanelManuallyPositioned = false;
+        historyPanelManuallyPositioned = false;
+        draggingChatPanel = false;
+        draggingHistoryPanel = false;
+        chatPanelRect = BuildChatPanelRect();
+        if (runtimeChatHistoryPanelRoot != null)
+        {
+            runtimeChatHistoryPanelRoot.gameObject.SetActive(false);
+        }
+
+        UpdateRuntimeChatVisuals();
+        runtimeChatPanelRoot.gameObject.SetActive(true);
+        RefreshRuntimeCanvasVisibility();
+        if (showGreetingBubble)
+        {
+            ShowPetChatBubble(defaultGreeting);
+        }
+        ExpandWindowRegionForChatUI();
+        windowController.SetClickThrough(false);
+
+        if (runtimeChatInputField != null)
+        {
+            runtimeChatInputField.Select();
+            runtimeChatInputField.ActivateInputField();
+        }
+    }
+
+    private void CloseChatPanel()
+    {
+        chatPanelOpen = false;
+        chatHistoryOpen = false;
+        draggingChatPanel = false;
+        draggingHistoryPanel = false;
+        chatPanelManuallyPositioned = false;
+        historyPanelManuallyPositioned = false;
+        cursorOverChat = false;
+        cursorOverHistory = false;
+
+        if (runtimeChatPanelRoot != null)
+        {
+            runtimeChatPanelRoot.gameObject.SetActive(false);
+        }
+
+        if (runtimeChatHistoryPanelRoot != null)
+        {
+            runtimeChatHistoryPanelRoot.gameObject.SetActive(false);
+        }
+
+        HidePetChatBubble(false);
+        RefreshRuntimeCanvasVisibility();
+
+        if (autoFitWindowToPet && windowController != null && windowController.IsReady && !menuOpen)
+        {
+            CropWindowToCharacter();
+        }
+    }
+
+    private void ToggleChatHistoryPanel()
+    {
+        if (!chatPanelOpen)
+        {
+            return;
+        }
+
+        chatHistoryOpen = !chatHistoryOpen;
+        draggingHistoryPanel = false;
+        cursorOverHistory = false;
+
+        if (chatHistoryOpen)
+        {
+            if (!historyPanelManuallyPositioned)
+            {
+                historyPanelRect = BuildHistoryPanelRect();
+            }
+
+            scrollHistoryToBottomPending = true;
+            if (runtimeChatHistoryPanelRoot != null)
+            {
+                runtimeChatHistoryPanelRoot.gameObject.SetActive(true);
+            }
+        }
+        else if (runtimeChatHistoryPanelRoot != null)
+        {
+            runtimeChatHistoryPanelRoot.gameObject.SetActive(false);
+        }
+
+        UpdateRuntimeChatVisuals();
+        RefreshRuntimeCanvasVisibility();
+        ExpandWindowRegionForChatUI();
     }
 
     private void ShowRuntimeMenu()
@@ -1063,22 +1674,29 @@ public class DesktopPetController : MonoBehaviour
         EnsureRuntimeMenu();
         RebuildRuntimeMenuItems();
         UpdateRuntimeMenuVisuals();
-        runtimeMenuCanvas.gameObject.SetActive(true);
+        runtimeMenuRoot.gameObject.SetActive(true);
+        RefreshRuntimeCanvasVisibility();
     }
 
     private void HideRuntimeMenu()
     {
-        if (runtimeMenuCanvas != null)
+        if (runtimeMenuRoot != null)
         {
-            runtimeMenuCanvas.gameObject.SetActive(false);
+            runtimeMenuRoot.gameObject.SetActive(false);
         }
+
+        RefreshRuntimeCanvasVisibility();
     }
 
     private void EnsureRuntimeMenu()
     {
         if (runtimeMenuCanvas != null)
         {
-            return;
+            TryBindExistingSceneUi();
+            if (runtimeMenuRoot != null)
+            {
+                return;
+            }
         }
 
         runtimeFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
@@ -1087,17 +1705,56 @@ public class DesktopPetController : MonoBehaviour
             runtimeFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
         }
 
-        GameObject canvasObject = new GameObject("DesktopPetMenuCanvas");
-        runtimeMenuCanvas = canvasObject.AddComponent<Canvas>();
-        runtimeMenuCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        runtimeMenuCanvas.sortingOrder = 2000;
-        canvasObject.AddComponent<CanvasScaler>();
-        canvasObject.AddComponent<GraphicRaycaster>();
-        DontDestroyOnLoad(canvasObject);
-        canvasObject.SetActive(false);
+        runtimeMenuCanvas = sceneUiCanvas;
+        if (runtimeMenuCanvas == null)
+        {
+            Transform existingCanvasTransform = transform.Find("DesktopPetMenuCanvas");
+            if (existingCanvasTransform != null)
+            {
+                runtimeMenuCanvas = existingCanvasTransform.GetComponent<Canvas>();
+            }
+        }
+
+        if (runtimeMenuCanvas == null)
+        {
+            GameObject canvasObject = new GameObject("DesktopPetMenuCanvas");
+            canvasObject.transform.SetParent(transform, false);
+            runtimeMenuCanvas = canvasObject.AddComponent<Canvas>();
+            runtimeMenuCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            runtimeMenuCanvas.sortingOrder = 2000;
+            canvasObject.AddComponent<CanvasScaler>();
+            canvasObject.AddComponent<GraphicRaycaster>();
+            ownsSceneUiCanvas = true;
+            sceneUiCanvas = runtimeMenuCanvas;
+        }
+        else
+        {
+            ownsSceneUiCanvas = false;
+            sceneUiCanvas = runtimeMenuCanvas;
+            runtimeMenuCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            runtimeMenuCanvas.sortingOrder = 2000;
+
+            if (runtimeMenuCanvas.GetComponent<CanvasScaler>() == null)
+            {
+                runtimeMenuCanvas.gameObject.AddComponent<CanvasScaler>();
+            }
+
+            if (runtimeMenuCanvas.GetComponent<GraphicRaycaster>() == null)
+            {
+                runtimeMenuCanvas.gameObject.AddComponent<GraphicRaycaster>();
+            }
+        }
+
+        runtimeMenuCanvas.gameObject.SetActive(false);
+
+        TryBindExistingSceneUi();
+        if (runtimeMenuRoot != null)
+        {
+            return;
+        }
 
         GameObject rootObject = new GameObject("MenuRoot");
-        rootObject.transform.SetParent(canvasObject.transform, false);
+        rootObject.transform.SetParent(runtimeMenuCanvas.transform, false);
         runtimeMenuRoot = rootObject.AddComponent<RectTransform>();
         runtimeMenuRoot.anchorMin = new Vector2(0f, 1f);
         runtimeMenuRoot.anchorMax = new Vector2(0f, 1f);
@@ -1115,30 +1772,262 @@ public class DesktopPetController : MonoBehaviour
         runtimeMenuHeader.alignment = TextAnchor.MiddleLeft;
         runtimeMenuHeader.text = MenuHeaderLabel;
         runtimeMenuHeader.color = new Color(0.96f, 0.97f, 0.99f, 1f);
+
+        GameObject itemsRootObject = new GameObject("Items");
+        itemsRootObject.transform.SetParent(rootObject.transform, false);
+        runtimeMenuItemsRoot = itemsRootObject.AddComponent<RectTransform>();
+        runtimeMenuItemsRoot.anchorMin = new Vector2(0f, 1f);
+        runtimeMenuItemsRoot.anchorMax = new Vector2(0f, 1f);
+        runtimeMenuItemsRoot.pivot = new Vector2(0f, 1f);
+        runtimeMenuItemsRoot.anchoredPosition = Vector2.zero;
+        runtimeMenuItemsRoot.sizeDelta = Vector2.zero;
+        runtimeMenuRoot.gameObject.SetActive(false);
+    }
+
+    private void EnsureRuntimeEventSystem()
+    {
+        if (FindObjectOfType<EventSystem>() != null)
+        {
+            return;
+        }
+
+        runtimeEventSystemObject = new GameObject("DesktopPetEventSystem");
+        runtimeEventSystemObject.AddComponent<EventSystem>();
+        runtimeEventSystemObject.AddComponent<StandaloneInputModule>();
+        ownsRuntimeEventSystem = true;
+    }
+
+    private void EnsureRuntimeChatPanel()
+    {
+        EnsureRuntimeMenu();
+        EnsureRuntimeEventSystem();
+
+        TryBindExistingSceneUi();
+        if (runtimeChatPanelRoot != null)
+        {
+            RebindChatButtonListeners();
+            return;
+        }
+
+        GameObject panelObject = new GameObject("ChatPanel");
+        panelObject.transform.SetParent(runtimeMenuCanvas.transform, false);
+        runtimeChatPanelRoot = panelObject.AddComponent<RectTransform>();
+        runtimeChatPanelRoot.anchorMin = new Vector2(0f, 1f);
+        runtimeChatPanelRoot.anchorMax = new Vector2(0f, 1f);
+        runtimeChatPanelRoot.pivot = new Vector2(0f, 1f);
+        runtimeChatPanelBackground = panelObject.AddComponent<Image>();
+        runtimeChatPanelBackground.color = GetRuntimeMenuColor(menuPanelColor);
+
+        runtimeChatHeader = CreateRuntimeMenuText("ChatHeader", panelObject.transform, 15, FontStyle.Bold);
+        RectTransform headerRect = runtimeChatHeader.rectTransform;
+        headerRect.anchorMin = new Vector2(0f, 1f);
+        headerRect.anchorMax = new Vector2(1f, 1f);
+        headerRect.pivot = new Vector2(0.5f, 1f);
+        headerRect.anchoredPosition = new Vector2(0f, -12f);
+        headerRect.sizeDelta = new Vector2(-144f, 26f);
+        runtimeChatHeader.alignment = TextAnchor.MiddleLeft;
+        runtimeChatHeader.text = ChatHeaderLabel;
+        runtimeChatHeader.color = new Color(0.96f, 0.97f, 0.99f, 1f);
+
+        GameObject historyButtonObject = CreateChatButtonObject("ChatHistoryButton", panelObject.transform, ChatHistoryLabel, out runtimeChatHistoryButton);
+        RectTransform historyButtonRect = historyButtonObject.GetComponent<RectTransform>();
+        historyButtonRect.anchorMin = new Vector2(1f, 1f);
+        historyButtonRect.anchorMax = new Vector2(1f, 1f);
+        historyButtonRect.pivot = new Vector2(1f, 1f);
+        historyButtonRect.sizeDelta = new Vector2(54f, 24f);
+        historyButtonRect.anchoredPosition = new Vector2(-72f, -8f);
+        runtimeChatHistoryButton.onClick.AddListener(ToggleChatHistoryPanel);
+
+        GameObject closeButtonObject = CreateChatButtonObject("ChatCloseButton", panelObject.transform, ChatCloseLabel, out runtimeChatCloseButton);
+        RectTransform closeRect = closeButtonObject.GetComponent<RectTransform>();
+        closeRect.anchorMin = new Vector2(1f, 1f);
+        closeRect.anchorMax = new Vector2(1f, 1f);
+        closeRect.pivot = new Vector2(1f, 1f);
+        closeRect.sizeDelta = new Vector2(54f, 24f);
+        closeRect.anchoredPosition = new Vector2(-10f, -8f);
+        runtimeChatCloseButton.onClick.AddListener(CloseChatPanel);
+
+        GameObject inputBackgroundObject = new GameObject("ChatInputBackground");
+        inputBackgroundObject.transform.SetParent(panelObject.transform, false);
+        RectTransform inputBackgroundRect = inputBackgroundObject.AddComponent<RectTransform>();
+        inputBackgroundRect.anchorMin = new Vector2(0f, 0f);
+        inputBackgroundRect.anchorMax = new Vector2(1f, 0f);
+        inputBackgroundRect.pivot = new Vector2(0.5f, 0f);
+        inputBackgroundRect.sizeDelta = new Vector2(-88f, 38f);
+        inputBackgroundRect.anchoredPosition = new Vector2(-34f, 10f);
+        Image inputBackground = inputBackgroundObject.AddComponent<Image>();
+        inputBackground.color = GetRuntimeMenuColor(new Color(0.16f, 0.19f, 0.25f, 1f));
+
+        runtimeChatInputField = inputBackgroundObject.AddComponent<InputField>();
+        runtimeChatInputField.targetGraphic = inputBackground;
+        runtimeChatInputField.lineType = InputField.LineType.SingleLine;
+
+        Text inputText = CreateRuntimeMenuText("Text", inputBackgroundObject.transform, 13, FontStyle.Normal);
+        RectTransform inputTextRect = inputText.rectTransform;
+        inputTextRect.anchorMin = Vector2.zero;
+        inputTextRect.anchorMax = Vector2.one;
+        inputTextRect.offsetMin = new Vector2(10f, 6f);
+        inputTextRect.offsetMax = new Vector2(-10f, -6f);
+        inputText.alignment = TextAnchor.MiddleLeft;
+        inputText.color = new Color(0.97f, 0.98f, 0.99f, 1f);
+        inputText.supportRichText = false;
+
+        Text placeholderText = CreateRuntimeMenuText("Placeholder", inputBackgroundObject.transform, 13, FontStyle.Italic);
+        RectTransform placeholderRect = placeholderText.rectTransform;
+        placeholderRect.anchorMin = Vector2.zero;
+        placeholderRect.anchorMax = Vector2.one;
+        placeholderRect.offsetMin = new Vector2(10f, 6f);
+        placeholderRect.offsetMax = new Vector2(-10f, -6f);
+        placeholderText.alignment = TextAnchor.MiddleLeft;
+        placeholderText.color = new Color(0.68f, 0.72f, 0.78f, 1f);
+        placeholderText.text = ChatInputPlaceholderLabel;
+
+        runtimeChatInputField.textComponent = inputText;
+        runtimeChatInputField.placeholder = placeholderText;
+
+        GameObject sendButtonObject = CreateChatButtonObject("ChatSendButton", panelObject.transform, ChatSendLabel, out runtimeChatSendButton);
+        RectTransform sendRect = sendButtonObject.GetComponent<RectTransform>();
+        sendRect.anchorMin = new Vector2(1f, 0f);
+        sendRect.anchorMax = new Vector2(1f, 0f);
+        sendRect.pivot = new Vector2(1f, 0f);
+        sendRect.sizeDelta = new Vector2(70f, 38f);
+        sendRect.anchoredPosition = new Vector2(-10f, 10f);
+        runtimeChatSendButton.onClick.AddListener(SubmitChatMessage);
+
+        GameObject historyPanelObject = new GameObject("ChatHistoryPanel");
+        historyPanelObject.transform.SetParent(runtimeMenuCanvas.transform, false);
+        runtimeChatHistoryPanelRoot = historyPanelObject.AddComponent<RectTransform>();
+        runtimeChatHistoryPanelRoot.anchorMin = new Vector2(0f, 1f);
+        runtimeChatHistoryPanelRoot.anchorMax = new Vector2(0f, 1f);
+        runtimeChatHistoryPanelRoot.pivot = new Vector2(0f, 1f);
+        runtimeChatHistoryPanelBackground = historyPanelObject.AddComponent<Image>();
+        runtimeChatHistoryPanelBackground.color = GetRuntimeMenuColor(menuPanelColor);
+
+        runtimeChatHistoryHeader = CreateRuntimeMenuText("ChatHistoryHeader", historyPanelObject.transform, 15, FontStyle.Bold);
+        RectTransform historyHeaderRect = runtimeChatHistoryHeader.rectTransform;
+        historyHeaderRect.anchorMin = new Vector2(0f, 1f);
+        historyHeaderRect.anchorMax = new Vector2(1f, 1f);
+        historyHeaderRect.pivot = new Vector2(0.5f, 1f);
+        historyHeaderRect.anchoredPosition = new Vector2(0f, -10f);
+        historyHeaderRect.sizeDelta = new Vector2(-88f, 28f);
+        runtimeChatHistoryHeader.alignment = TextAnchor.MiddleLeft;
+        runtimeChatHistoryHeader.text = ChatHistoryHeaderLabel;
+        runtimeChatHistoryHeader.color = new Color(0.96f, 0.97f, 0.99f, 1f);
+
+        GameObject historyCloseButtonObject = CreateChatButtonObject("ChatHistoryCloseButton", historyPanelObject.transform, ChatCloseLabel, out runtimeChatHistoryCloseButton);
+        RectTransform historyCloseRect = historyCloseButtonObject.GetComponent<RectTransform>();
+        historyCloseRect.anchorMin = new Vector2(1f, 1f);
+        historyCloseRect.anchorMax = new Vector2(1f, 1f);
+        historyCloseRect.pivot = new Vector2(1f, 1f);
+        historyCloseRect.sizeDelta = new Vector2(54f, 24f);
+        historyCloseRect.anchoredPosition = new Vector2(-10f, -8f);
+        runtimeChatHistoryCloseButton.onClick.AddListener(ToggleChatHistoryPanel);
+
+        GameObject viewportObject = new GameObject("ChatHistoryViewport");
+        viewportObject.transform.SetParent(historyPanelObject.transform, false);
+        RectTransform viewportRect = viewportObject.AddComponent<RectTransform>();
+        viewportRect.anchorMin = new Vector2(0f, 0f);
+        viewportRect.anchorMax = new Vector2(1f, 1f);
+        viewportRect.offsetMin = new Vector2(10f, 10f);
+        viewportRect.offsetMax = new Vector2(-10f, -42f);
+        Image viewportImage = viewportObject.AddComponent<Image>();
+        viewportImage.color = GetRuntimeMenuColor(new Color(0.12f, 0.15f, 0.2f, 0.96f));
+        viewportObject.AddComponent<RectMask2D>();
+
+        runtimeChatHistoryText = CreateRuntimeMenuText("ChatHistory", viewportObject.transform, 13, FontStyle.Normal);
+        RectTransform historyTextRect = runtimeChatHistoryText.rectTransform;
+        historyTextRect.anchorMin = new Vector2(0f, 1f);
+        historyTextRect.anchorMax = new Vector2(1f, 1f);
+        historyTextRect.pivot = new Vector2(0.5f, 1f);
+        historyTextRect.anchoredPosition = new Vector2(0f, -10f);
+        historyTextRect.sizeDelta = new Vector2(-18f, 0f);
+        ContentSizeFitter historyFitter = runtimeChatHistoryText.gameObject.AddComponent<ContentSizeFitter>();
+        historyFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        runtimeChatHistoryText.alignment = TextAnchor.UpperLeft;
+        runtimeChatHistoryText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        runtimeChatHistoryText.verticalOverflow = VerticalWrapMode.Overflow;
+        runtimeChatHistoryText.supportRichText = false;
+        runtimeChatHistoryText.color = new Color(0.94f, 0.96f, 0.98f, 1f);
+        runtimeChatHistoryText.text = string.Empty;
+
+        runtimeChatHistoryScrollRect = historyPanelObject.AddComponent<ScrollRect>();
+        runtimeChatHistoryScrollRect.viewport = viewportRect;
+        runtimeChatHistoryScrollRect.content = historyTextRect;
+        runtimeChatHistoryScrollRect.horizontal = false;
+        runtimeChatHistoryScrollRect.movementType = ScrollRect.MovementType.Clamped;
+        runtimeChatHistoryScrollRect.scrollSensitivity = 22f;
+
+        GameObject bubbleObject = new GameObject("ChatBubble");
+        bubbleObject.transform.SetParent(runtimeMenuCanvas.transform, false);
+        runtimeChatBubbleRoot = bubbleObject.AddComponent<RectTransform>();
+        runtimeChatBubbleRoot.anchorMin = new Vector2(0f, 1f);
+        runtimeChatBubbleRoot.anchorMax = new Vector2(0f, 1f);
+        runtimeChatBubbleRoot.pivot = new Vector2(0f, 1f);
+        runtimeChatBubbleRoot.sizeDelta = new Vector2(chatBubbleMaxSize.x, chatBubbleMaxSize.y);
+
+        GameObject bubbleBodyObject = new GameObject("BubbleBody");
+        bubbleBodyObject.transform.SetParent(bubbleObject.transform, false);
+        runtimeChatBubbleBodyRoot = bubbleBodyObject.AddComponent<RectTransform>();
+        runtimeChatBubbleBodyRoot.anchorMin = new Vector2(0f, 1f);
+        runtimeChatBubbleBodyRoot.anchorMax = new Vector2(0f, 1f);
+        runtimeChatBubbleBodyRoot.pivot = new Vector2(0f, 1f);
+        runtimeChatBubbleBodyRoot.anchoredPosition = Vector2.zero;
+        runtimeChatBubbleBodyRoot.sizeDelta = new Vector2(chatBubbleMaxSize.x, chatBubbleMaxSize.y);
+        runtimeChatBubbleBackground = bubbleBodyObject.AddComponent<Image>();
+        runtimeChatBubbleBackground.color = GetRuntimeMenuColor(new Color(0.98f, 0.99f, 1f, 1f));
+        runtimeChatBubbleBackground.raycastTarget = false;
+
+        GameObject bubbleTailObject = new GameObject("BubbleTail");
+        bubbleTailObject.transform.SetParent(bubbleObject.transform, false);
+        runtimeChatBubbleTailRoot = bubbleTailObject.AddComponent<RectTransform>();
+        runtimeChatBubbleTailRoot.anchorMin = new Vector2(0.5f, 1f);
+        runtimeChatBubbleTailRoot.anchorMax = new Vector2(0.5f, 1f);
+        runtimeChatBubbleTailRoot.pivot = new Vector2(0.5f, 1f);
+        runtimeChatBubbleTailRoot.anchoredPosition = new Vector2(0f, 0f);
+        runtimeChatBubbleTailRoot.sizeDelta = new Vector2(24f, 18f);
+        runtimeChatBubbleTailBackground = bubbleTailObject.AddComponent<Image>();
+        runtimeChatBubbleTailBackground.color = GetRuntimeMenuColor(new Color(0.98f, 0.99f, 1f, 1f));
+        runtimeChatBubbleTailBackground.raycastTarget = false;
+        bubbleTailObject.SetActive(false);
+
+        runtimeChatBubbleText = CreateRuntimeMenuText("BubbleText", bubbleBodyObject.transform, 13, FontStyle.Bold);
+        RectTransform bubbleTextRect = runtimeChatBubbleText.rectTransform;
+        bubbleTextRect.anchorMin = Vector2.zero;
+        bubbleTextRect.anchorMax = Vector2.one;
+        bubbleTextRect.offsetMin = new Vector2(28f, 34f);
+        bubbleTextRect.offsetMax = new Vector2(-28f, -94f);
+        runtimeChatBubbleText.alignment = TextAnchor.UpperCenter;
+        runtimeChatBubbleText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        runtimeChatBubbleText.verticalOverflow = VerticalWrapMode.Overflow;
+        runtimeChatBubbleText.supportRichText = false;
+        runtimeChatBubbleText.color = new Color(0.16f, 0.19f, 0.23f, 1f);
+        runtimeChatBubbleText.text = string.Empty;
+        EnsureBubbleSprites();
+
+        runtimeChatPanelRoot.gameObject.SetActive(false);
+        runtimeChatHistoryPanelRoot.gameObject.SetActive(false);
+        runtimeChatBubbleRoot.gameObject.SetActive(false);
     }
 
     private void RebuildRuntimeMenuItems()
     {
         EnsureRuntimeMenu();
+        TryBindExistingSceneUi();
 
-        for (int i = 0; i < runtimeMenuItemBackgrounds.Count; i++)
-        {
-            if (runtimeMenuItemBackgrounds[i] != null)
-            {
-                Destroy(runtimeMenuItemBackgrounds[i].gameObject);
-            }
-        }
-
+        ClearMenuItemBindings();
+        HideUnusedMenuItems();
         runtimeMenuItemBackgrounds.Clear();
+        runtimeChatMenuBackground = null;
         runtimeExitBackground = null;
 
         for (int i = 0; i < availableMenuStates.Count; i++)
         {
-            Image itemBackground = CreateRuntimeMenuItem("State_" + i, availableMenuStates[i], i);
+            Image itemBackground = CreateOrUpdateRuntimeMenuItem("State_" + i, availableMenuStates[i], i);
             runtimeMenuItemBackgrounds.Add(itemBackground);
         }
 
-        runtimeExitBackground = CreateRuntimeMenuItem("Exit", ExitMenuLabel, availableMenuStates.Count);
+        runtimeChatMenuBackground = CreateOrUpdateRuntimeMenuItem("Chat", ChatMenuLabel, GetChatMenuIndex());
+        runtimeExitBackground = CreateOrUpdateRuntimeMenuItem("Exit", ExitMenuLabel, GetExitMenuIndex());
         Text exitLabel = runtimeExitBackground.GetComponentInChildren<Text>();
         if (exitLabel != null)
         {
@@ -1146,22 +2035,50 @@ public class DesktopPetController : MonoBehaviour
         }
     }
 
-    private Image CreateRuntimeMenuItem(string objectName, string label, int index)
+    private Image CreateOrUpdateRuntimeMenuItem(string objectName, string label, int index)
     {
-        GameObject itemObject = new GameObject(objectName);
-        itemObject.transform.SetParent(runtimeMenuRoot, false);
-        RectTransform itemRect = itemObject.AddComponent<RectTransform>();
-        Rect localRect = index == availableMenuStates.Count ? GetExitItemRect() : GetMenuItemRect(index);
+        Transform parent = runtimeMenuItemsRoot != null ? runtimeMenuItemsRoot : runtimeMenuRoot;
+        if (parent == null)
+        {
+            return null;
+        }
+
+        Transform existingTransform = parent.Find(objectName);
+        GameObject itemObject;
+        RectTransform itemRect;
+        Image background;
+        Text itemLabel;
+        if (existingTransform != null)
+        {
+            itemObject = existingTransform.gameObject;
+            itemRect = existingTransform as RectTransform;
+            background = itemObject.GetComponent<Image>();
+            itemLabel = itemObject.GetComponentInChildren<Text>(true);
+        }
+        else
+        {
+            itemObject = new GameObject(objectName);
+            itemObject.transform.SetParent(parent, false);
+            itemRect = itemObject.AddComponent<RectTransform>();
+            background = itemObject.AddComponent<Image>();
+            itemLabel = CreateRuntimeMenuText("Label", itemObject.transform, 13, FontStyle.Normal);
+        }
+
+        Rect localRect = GetMenuItemRect(index);
+        if (index == GetChatMenuIndex())
+        {
+            localRect = GetChatItemRect();
+        }
+        else if (index == GetExitMenuIndex())
+        {
+            localRect = GetExitItemRect();
+        }
         itemRect.anchorMin = new Vector2(0f, 1f);
         itemRect.anchorMax = new Vector2(0f, 1f);
         itemRect.pivot = new Vector2(0f, 1f);
         itemRect.sizeDelta = new Vector2(localRect.width, localRect.height);
         itemRect.anchoredPosition = new Vector2(localRect.x - menuRect.x, -(localRect.y - menuRect.y));
-
-        Image background = itemObject.AddComponent<Image>();
         background.color = GetRuntimeMenuColor(menuItemColor);
-
-        Text itemLabel = CreateRuntimeMenuText("Label", itemObject.transform, 13, FontStyle.Normal);
         RectTransform labelRect = itemLabel.rectTransform;
         labelRect.anchorMin = Vector2.zero;
         labelRect.anchorMax = Vector2.one;
@@ -1170,8 +2087,34 @@ public class DesktopPetController : MonoBehaviour
         itemLabel.alignment = TextAnchor.MiddleLeft;
         itemLabel.color = new Color(0.95f, 0.96f, 0.98f, 1f);
         itemLabel.text = label;
+        itemObject.SetActive(true);
 
         return background;
+    }
+
+    private void ClearMenuItemBindings()
+    {
+        runtimeMenuItemBackgrounds.Clear();
+        runtimeChatMenuBackground = null;
+        runtimeExitBackground = null;
+    }
+
+    private void HideUnusedMenuItems()
+    {
+        Transform parent = runtimeMenuItemsRoot != null ? runtimeMenuItemsRoot : runtimeMenuRoot;
+        if (parent == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < parent.childCount; i++)
+        {
+            Transform child = parent.GetChild(i);
+            if (child != null)
+            {
+                child.gameObject.SetActive(false);
+            }
+        }
     }
 
     private Text CreateRuntimeMenuText(string objectName, Transform parent, int fontSize, FontStyle fontStyle)
@@ -1184,6 +2127,558 @@ public class DesktopPetController : MonoBehaviour
         text.fontStyle = fontStyle;
         text.raycastTarget = false;
         return text;
+    }
+
+    private GameObject CreateChatButtonObject(string objectName, Transform parent, string label, out Button button)
+    {
+        GameObject buttonObject = new GameObject(objectName);
+        buttonObject.transform.SetParent(parent, false);
+        buttonObject.AddComponent<RectTransform>();
+        Image buttonBackground = buttonObject.AddComponent<Image>();
+        buttonBackground.color = GetRuntimeMenuColor(menuHoverColor);
+        button = buttonObject.AddComponent<Button>();
+        button.targetGraphic = buttonBackground;
+
+        Text buttonLabel = CreateRuntimeMenuText("Label", buttonObject.transform, 12, FontStyle.Bold);
+        RectTransform labelRect = buttonLabel.rectTransform;
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.offsetMin = new Vector2(6f, 4f);
+        labelRect.offsetMax = new Vector2(-6f, -4f);
+        buttonLabel.alignment = TextAnchor.MiddleCenter;
+        buttonLabel.color = new Color(0.98f, 0.99f, 1f, 1f);
+        buttonLabel.text = label;
+
+        return buttonObject;
+    }
+
+    private void EnsureBubbleSprites()
+    {
+        if (runtimeChatBubbleBodySprite == null)
+        {
+            runtimeChatBubbleBodySprite = chatBubbleBodySpriteOverride != null
+                ? CreateColorKeySafeSprite(chatBubbleBodySpriteOverride)
+                : CreateEllipseSprite(128);
+        }
+
+        if (runtimeChatBubbleTailSprite == null)
+        {
+            runtimeChatBubbleTailSprite = CreateTriangleSprite(64, 40);
+        }
+
+        if (runtimeChatBubbleBackground != null)
+        {
+            runtimeChatBubbleBackground.sprite = runtimeChatBubbleBodySprite;
+            runtimeChatBubbleBackground.type = Image.Type.Simple;
+            runtimeChatBubbleBackground.preserveAspect = false;
+        }
+    }
+
+    private void TryBindExistingSceneUi()
+    {
+        if (runtimeMenuCanvas == null)
+        {
+            return;
+        }
+
+        if (runtimeMenuRoot == null)
+        {
+            Transform menuRoot = runtimeMenuCanvas.transform.Find("MenuRoot");
+            if (menuRoot != null)
+            {
+                runtimeMenuRoot = menuRoot as RectTransform;
+                runtimeMenuHeader = menuRoot.Find("Header")?.GetComponent<Text>();
+                runtimeMenuItemsRoot = menuRoot.Find("Items") as RectTransform;
+            }
+        }
+
+        if (runtimeChatPanelRoot == null)
+        {
+            Transform chatPanel = runtimeMenuCanvas.transform.Find("ChatPanel");
+            if (chatPanel != null)
+            {
+                runtimeChatPanelRoot = chatPanel as RectTransform;
+                runtimeChatPanelBackground = chatPanel.GetComponent<Image>();
+                runtimeChatHeader = chatPanel.Find("ChatHeader")?.GetComponent<Text>();
+                runtimeChatHistoryButton = chatPanel.Find("ChatHistoryButton")?.GetComponent<Button>();
+                runtimeChatCloseButton = chatPanel.Find("ChatCloseButton")?.GetComponent<Button>();
+
+                Transform inputBackground = chatPanel.Find("ChatInputBackground");
+                if (inputBackground != null)
+                {
+                    runtimeChatInputField = inputBackground.GetComponent<InputField>();
+                }
+
+                runtimeChatSendButton = chatPanel.Find("ChatSendButton")?.GetComponent<Button>();
+            }
+        }
+
+        if (runtimeChatHistoryPanelRoot == null)
+        {
+            Transform historyPanel = runtimeMenuCanvas.transform.Find("ChatHistoryPanel");
+            if (historyPanel != null)
+            {
+                runtimeChatHistoryPanelRoot = historyPanel as RectTransform;
+                runtimeChatHistoryPanelBackground = historyPanel.GetComponent<Image>();
+                runtimeChatHistoryHeader = historyPanel.Find("ChatHistoryHeader")?.GetComponent<Text>();
+                runtimeChatHistoryCloseButton = historyPanel.Find("ChatHistoryCloseButton")?.GetComponent<Button>();
+                runtimeChatHistoryScrollRect = historyPanel.GetComponent<ScrollRect>();
+                runtimeChatHistoryText = historyPanel.Find("ChatHistoryViewport/ChatHistory")?.GetComponent<Text>();
+            }
+        }
+
+        if (runtimeChatBubbleRoot == null)
+        {
+            Transform bubbleRoot = runtimeMenuCanvas.transform.Find("ChatBubble");
+            if (bubbleRoot != null)
+            {
+                runtimeChatBubbleRoot = bubbleRoot as RectTransform;
+                runtimeChatBubbleBodyRoot = bubbleRoot.Find("BubbleBody") as RectTransform;
+                runtimeChatBubbleTailRoot = bubbleRoot.Find("BubbleTail") as RectTransform;
+                runtimeChatBubbleBackground = bubbleRoot.Find("BubbleBody")?.GetComponent<Image>();
+                runtimeChatBubbleTailBackground = bubbleRoot.Find("BubbleTail")?.GetComponent<Image>();
+                runtimeChatBubbleText = bubbleRoot.Find("BubbleBody/BubbleText")?.GetComponent<Text>();
+            }
+        }
+    }
+
+    private void RebindChatButtonListeners()
+    {
+        if (runtimeChatHistoryButton != null)
+        {
+            runtimeChatHistoryButton.onClick.RemoveAllListeners();
+            runtimeChatHistoryButton.onClick.AddListener(ToggleChatHistoryPanel);
+        }
+
+        if (runtimeChatCloseButton != null)
+        {
+            runtimeChatCloseButton.onClick.RemoveAllListeners();
+            runtimeChatCloseButton.onClick.AddListener(CloseChatPanel);
+        }
+
+        if (runtimeChatSendButton != null)
+        {
+            runtimeChatSendButton.onClick.RemoveAllListeners();
+            runtimeChatSendButton.onClick.AddListener(SubmitChatMessage);
+        }
+
+        if (runtimeChatHistoryCloseButton != null)
+        {
+            runtimeChatHistoryCloseButton.onClick.RemoveAllListeners();
+            runtimeChatHistoryCloseButton.onClick.AddListener(ToggleChatHistoryPanel);
+        }
+    }
+
+    private void DestroyUiObject(Object target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Destroy(target);
+            return;
+        }
+
+        DestroyImmediate(target);
+    }
+
+    private Sprite CreateColorKeySafeSprite(Sprite sourceSprite)
+    {
+        if (sourceSprite == null)
+        {
+            return null;
+        }
+
+        Texture2D sourceTexture = sourceSprite.texture;
+        if (sourceTexture == null)
+        {
+            return sourceSprite;
+        }
+
+        Rect rect = sourceSprite.rect;
+        int width = Mathf.Max(1, Mathf.RoundToInt(rect.width));
+        int height = Mathf.Max(1, Mathf.RoundToInt(rect.height));
+        Texture2D readableTexture = CreateReadableTexture(sourceTexture, width, height);
+        if (readableTexture == null)
+        {
+            return sourceSprite;
+        }
+
+        Color32[] sourcePixels = readableTexture.GetPixels32();
+        Color32[] processedPixels = new Color32[sourcePixels.Length];
+        Color32 opaqueFill = new Color32(255, 255, 255, 255);
+
+        for (int i = 0; i < sourcePixels.Length; i++)
+        {
+            processedPixels[i] = sourcePixels[i].a >= BubbleAlphaCutoff
+                ? opaqueFill
+                : new Color32(255, 255, 255, 0);
+        }
+
+        Texture2D processedTexture = new Texture2D(width, height, TextureFormat.RGBA32, false, false)
+        {
+            filterMode = FilterMode.Point,
+            wrapMode = TextureWrapMode.Clamp
+        };
+        processedTexture.SetPixels32(processedPixels);
+        processedTexture.Apply(false, false);
+
+        Destroy(readableTexture);
+
+        runtimeChatBubbleProcessedTexture = processedTexture;
+        return Sprite.Create(processedTexture, new Rect(0f, 0f, width, height), sourceSprite.pivot / rect.size, sourceSprite.pixelsPerUnit);
+    }
+
+    private static Texture2D CreateReadableTexture(Texture2D sourceTexture, int width, int height)
+    {
+        RenderTexture renderTexture = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
+        RenderTexture previous = RenderTexture.active;
+
+        try
+        {
+            Graphics.Blit(sourceTexture, renderTexture);
+            RenderTexture.active = renderTexture;
+            Texture2D readableTexture = new Texture2D(width, height, TextureFormat.RGBA32, false, false)
+            {
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            readableTexture.ReadPixels(new Rect(0f, 0f, width, height), 0, 0, false);
+            readableTexture.Apply(false, false);
+            return readableTexture;
+        }
+        finally
+        {
+            RenderTexture.active = previous;
+            RenderTexture.ReleaseTemporary(renderTexture);
+        }
+    }
+
+    private static Sprite CreateEllipseSprite(int size)
+    {
+        Texture2D texture = new Texture2D(size, size, TextureFormat.RGBA32, false, false)
+        {
+            filterMode = FilterMode.Point,
+            wrapMode = TextureWrapMode.Clamp
+        };
+
+        Color32[] pixels = new Color32[size * size];
+        float radius = size * 0.5f;
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float dx = (x + 0.5f - radius) / radius;
+                float dy = (y + 0.5f - radius) / radius;
+                float distance = Mathf.Sqrt(dx * dx + dy * dy);
+                bool inside = distance <= 1f;
+                pixels[y * size + x] = inside
+                    ? new Color32(255, 255, 255, 255)
+                    : new Color32(255, 255, 255, 0);
+            }
+        }
+
+        texture.SetPixels32(pixels);
+        texture.Apply(false, false);
+        return Sprite.Create(texture, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f), size);
+    }
+
+    private static Sprite CreateTriangleSprite(int width, int height)
+    {
+        Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false, false)
+        {
+            filterMode = FilterMode.Point,
+            wrapMode = TextureWrapMode.Clamp
+        };
+
+        Color32[] pixels = new Color32[width * height];
+        float centerX = (width - 1) * 0.5f;
+
+        for (int y = 0; y < height; y++)
+        {
+            float normalizedY = (float)y / Mathf.Max(1f, height - 1f);
+            float halfWidth = normalizedY * centerX;
+
+            for (int x = 0; x < width; x++)
+            {
+                float distanceFromCenter = Mathf.Abs(x - centerX);
+                bool inside = distanceFromCenter <= halfWidth;
+                pixels[y * width + x] = inside
+                    ? new Color32(255, 255, 255, 255)
+                    : new Color32(255, 255, 255, 0);
+            }
+        }
+
+        texture.SetPixels32(pixels);
+        texture.Apply(false, false);
+        return Sprite.Create(texture, new Rect(0f, 0f, width, height), new Vector2(0.5f, 0f), width);
+    }
+
+    private void UpdateRuntimeChatVisuals()
+    {
+        if (runtimeMenuCanvas == null)
+        {
+            return;
+        }
+
+        if (chatPanelOpen && runtimeChatPanelRoot != null)
+        {
+            if (!draggingChatPanel && !chatPanelManuallyPositioned)
+            {
+                chatPanelRect = BuildChatPanelRect();
+            }
+
+            runtimeChatPanelRoot.sizeDelta = chatPanelRect.size;
+            runtimeChatPanelRoot.anchoredPosition = new Vector2(chatPanelRect.x, -chatPanelRect.y);
+
+            if (runtimeChatPanelBackground != null)
+            {
+                runtimeChatPanelBackground.color = GetRuntimeMenuColor(menuPanelColor);
+            }
+
+            Image historyButtonImage = runtimeChatHistoryButton != null
+                ? runtimeChatHistoryButton.targetGraphic as Image
+                : null;
+            if (historyButtonImage != null)
+            {
+                historyButtonImage.color = GetRuntimeMenuColor(chatHistoryOpen ? menuActiveColor : menuHoverColor);
+            }
+        }
+
+        if (chatHistoryOpen && runtimeChatHistoryPanelRoot != null)
+        {
+            if (!draggingHistoryPanel && !historyPanelManuallyPositioned)
+            {
+                historyPanelRect = BuildHistoryPanelRect();
+            }
+
+            runtimeChatHistoryPanelRoot.sizeDelta = historyPanelRect.size;
+            runtimeChatHistoryPanelRoot.anchoredPosition = new Vector2(historyPanelRect.x, -historyPanelRect.y);
+
+            if (runtimeChatHistoryPanelBackground != null)
+            {
+                runtimeChatHistoryPanelBackground.color = GetRuntimeMenuColor(menuPanelColor);
+            }
+
+            if (runtimeChatHistoryText != null)
+            {
+                if (chatHistoryDirty)
+                {
+                    cachedChatHistoryText = chatHistory.Count > 0
+                        ? string.Join("\n\n", chatHistory.ToArray())
+                        : "\u8fd8\u6ca1\u6709\u5bf9\u8bdd\u8bb0\u5f55\u3002";
+                    chatHistoryDirty = false;
+                }
+
+                runtimeChatHistoryText.text = cachedChatHistoryText;
+            }
+
+            if (scrollHistoryToBottomPending && runtimeChatHistoryScrollRect != null)
+            {
+                Canvas.ForceUpdateCanvases();
+                runtimeChatHistoryScrollRect.verticalNormalizedPosition = 0f;
+                scrollHistoryToBottomPending = false;
+            }
+        }
+
+        if (chatBubbleVisible && runtimeChatBubbleRoot != null)
+        {
+            EnsureBubbleSprites();
+            chatBubbleRect = BuildChatBubbleRect();
+            runtimeChatBubbleRoot.sizeDelta = chatBubbleRect.size;
+            runtimeChatBubbleRoot.anchoredPosition = new Vector2(chatBubbleRect.x, -chatBubbleRect.y);
+
+            if (runtimeChatBubbleBodyRoot != null)
+            {
+                runtimeChatBubbleBodyRoot.sizeDelta = new Vector2(chatBubbleRect.width, chatBubbleRect.height);
+            }
+
+            if (runtimeChatBubbleTailRoot != null)
+            {
+                runtimeChatBubbleTailRoot.gameObject.SetActive(false);
+            }
+
+            if (runtimeChatBubbleText != null)
+            {
+                RectTransform bubbleTextRect = runtimeChatBubbleText.rectTransform;
+                float sideInset = chatBubbleRect.width * BubbleSideInsetRatio;
+                float topInset = chatBubbleRect.height * BubbleTopInsetRatio;
+                float bottomInset = chatBubbleRect.height * BubbleBottomInsetRatio;
+                bubbleTextRect.offsetMin = new Vector2(sideInset, bottomInset);
+                bubbleTextRect.offsetMax = new Vector2(-sideInset, -topInset);
+            }
+
+            if (runtimeChatBubbleBackground != null)
+            {
+                runtimeChatBubbleBackground.color = GetRuntimeMenuColor(new Color(0.98f, 0.99f, 1f, 1f));
+            }
+        }
+    }
+
+    private void SubmitChatMessage()
+    {
+        if (runtimeChatInputField == null)
+        {
+            return;
+        }
+
+        string userMessage = runtimeChatInputField.text.Trim();
+        if (string.IsNullOrEmpty(userMessage))
+        {
+            runtimeChatInputField.Select();
+            runtimeChatInputField.ActivateInputField();
+            return;
+        }
+
+        AppendChatLine("\u6211", userMessage);
+        runtimeChatInputField.text = string.Empty;
+
+        string reply = GetLocalChatReply(userMessage);
+        AppendChatLine("\u5c0f\u6d63\u718a", reply);
+        PlayRandomChatAnimation();
+        ShowPetChatBubble(reply);
+        UpdateRuntimeChatVisuals();
+        ExpandWindowRegionForChatUI();
+
+        runtimeChatInputField.Select();
+        runtimeChatInputField.ActivateInputField();
+    }
+
+    private void AppendChatLine(string speaker, string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        chatHistory.Add(speaker + "\uff1a" + message.Trim());
+        scrollHistoryToBottomPending = true;
+        chatHistoryDirty = true;
+        const int maxLines = 120;
+        while (chatHistory.Count > maxLines)
+        {
+            chatHistory.RemoveAt(0);
+        }
+    }
+
+    private void ShowPetChatBubble(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        EnsureRuntimeChatPanel();
+        chatBubbleVisible = true;
+        if (runtimeChatBubbleText != null)
+        {
+            runtimeChatBubbleText.text = message.Trim();
+        }
+
+        if (runtimeChatBubbleRoot != null)
+        {
+            runtimeChatBubbleRoot.gameObject.SetActive(true);
+        }
+
+        UpdateRuntimeChatVisuals();
+        RefreshRuntimeCanvasVisibility();
+        ExpandWindowRegionForChatUI();
+
+        if (chatBubbleRoutine != null)
+        {
+            StopCoroutine(chatBubbleRoutine);
+        }
+
+        chatBubbleRoutine = StartCoroutine(HidePetChatBubbleAfterDelay(chatBubbleDuration));
+    }
+
+    private void HidePetChatBubble(bool updateWindow = true)
+    {
+        if (chatBubbleRoutine != null)
+        {
+            StopCoroutine(chatBubbleRoutine);
+            chatBubbleRoutine = null;
+        }
+
+        chatBubbleVisible = false;
+        if (runtimeChatBubbleRoot != null)
+        {
+            runtimeChatBubbleRoot.gameObject.SetActive(false);
+        }
+
+        RefreshRuntimeCanvasVisibility();
+
+        if (!updateWindow)
+        {
+            return;
+        }
+
+        if (chatPanelOpen || chatHistoryOpen)
+        {
+            ExpandWindowRegionForChatUI();
+        }
+        else if (autoFitWindowToPet && windowController != null && windowController.IsReady && !menuOpen)
+        {
+            CropWindowToCharacter();
+        }
+    }
+
+    private IEnumerator HidePetChatBubbleAfterDelay(float delay)
+    {
+        yield return new WaitForSecondsRealtime(Mathf.Max(0.8f, delay));
+        chatBubbleRoutine = null;
+        HidePetChatBubble();
+    }
+
+    private string GetLocalChatReply(string userMessage)
+    {
+        string normalizedMessage = userMessage.Trim();
+        if (normalizedMessage.Contains("\u4f60\u597d") || normalizedMessage.Contains("hello") || normalizedMessage.Contains("hi"))
+        {
+            return "\u4f60\u597d\u5440\uff0c\u5f88\u5f00\u5fc3\u53c8\u542c\u5230\u4f60\u8bf4\u8bdd\u3002";
+        }
+
+        if (normalizedMessage.Contains("\u540d\u5b57"))
+        {
+            return "\u6211\u662f\u4f60\u7684\u684c\u5ba0\u5c0f\u6d63\u718a\uff0c\u968f\u65f6\u53ef\u4ee5\u966a\u4f60\u804a\u804a\u5929\u3002";
+        }
+
+        if (localChatReplies != null && localChatReplies.Length > 0)
+        {
+            string[] nonEmptyReplies = System.Array.FindAll(localChatReplies, reply => !string.IsNullOrWhiteSpace(reply));
+            if (nonEmptyReplies.Length > 0)
+            {
+                return nonEmptyReplies[Random.Range(0, nonEmptyReplies.Length)];
+            }
+        }
+
+        return "\u6211\u542c\u5230\u4e86\uff1a" + normalizedMessage;
+    }
+
+    private void PlayRandomChatAnimation()
+    {
+        if (!TryPlayRandomAvailableState(chatAnimationStateNames))
+        {
+            return;
+        }
+
+        if (chatAnimationRoutine != null)
+        {
+            StopCoroutine(chatAnimationRoutine);
+        }
+
+        chatAnimationRoutine = StartCoroutine(RestoreInitialStateAfterDelay(chatAnimationHoldDuration));
+    }
+
+    private IEnumerator RestoreInitialStateAfterDelay(float delay)
+    {
+        yield return new WaitForSecondsRealtime(Mathf.Max(0.2f, delay));
+        PlayInitialState();
+        chatAnimationRoutine = null;
     }
 
     private void UpdateRuntimeMenuVisuals()
@@ -1216,13 +2711,32 @@ public class DesktopPetController : MonoBehaviour
             runtimeMenuItemBackgrounds[i].color = GetRuntimeMenuColor(backgroundColor);
         }
 
+        if (runtimeChatMenuBackground != null)
+        {
+            Color chatColor = hoveredMenuIndex == GetChatMenuIndex()
+                ? menuHoverColor
+                : menuItemColor;
+            runtimeChatMenuBackground.color = GetRuntimeMenuColor(chatColor);
+        }
+
         if (runtimeExitBackground != null)
         {
-            Color exitColor = hoveredMenuIndex == availableMenuStates.Count
+            Color exitColor = hoveredMenuIndex == GetExitMenuIndex()
                 ? menuHoverColor
                 : new Color(0.45f, 0.2f, 0.2f, 1f);
             runtimeExitBackground.color = GetRuntimeMenuColor(exitColor);
         }
+    }
+
+    private void RefreshRuntimeCanvasVisibility()
+    {
+        if (runtimeMenuCanvas == null)
+        {
+            return;
+        }
+
+        bool shouldShow = menuOpen || chatPanelOpen || chatHistoryOpen || chatBubbleVisible;
+        runtimeMenuCanvas.gameObject.SetActive(shouldShow);
     }
 
     private Color GetRuntimeMenuColor(Color source)
@@ -1238,6 +2752,7 @@ public class DesktopPetController : MonoBehaviour
     private void CleanupLegacyPreviewUI()
     {
         DestroyNamedObjectIfPresent("AnimationCanvas");
+        DestroyNamedObjectIfPresent("DesktopPetEventSystem");
     }
 
     private static void DestroyNamedObjectIfPresent(string objectName)
@@ -1267,10 +2782,77 @@ public class DesktopPetController : MonoBehaviour
             regionMaskRoutine = null;
         }
 
+        if (chatAnimationRoutine != null)
+        {
+            StopCoroutine(chatAnimationRoutine);
+            chatAnimationRoutine = null;
+        }
+
+        if (chatBubbleRoutine != null)
+        {
+            StopCoroutine(chatBubbleRoutine);
+            chatBubbleRoutine = null;
+        }
+
         if (regionMaskTexture != null)
         {
             Destroy(regionMaskTexture);
             regionMaskTexture = null;
+        }
+
+        if (runtimeMenuCanvas != null)
+        {
+            if (ownsSceneUiCanvas)
+            {
+                Destroy(runtimeMenuCanvas.gameObject);
+            }
+
+            runtimeMenuCanvas = null;
+            sceneUiCanvas = null;
+            ownsSceneUiCanvas = false;
+        }
+
+        if (runtimeEventSystemObject != null)
+        {
+            if (ownsRuntimeEventSystem)
+            {
+                Destroy(runtimeEventSystemObject);
+            }
+
+            runtimeEventSystemObject = null;
+            ownsRuntimeEventSystem = false;
+        }
+
+        if (runtimeChatBubbleBodySprite != null)
+        {
+            if (runtimeChatBubbleProcessedTexture != null)
+            {
+                Destroy(runtimeChatBubbleProcessedTexture);
+                runtimeChatBubbleProcessedTexture = null;
+            }
+
+            if (chatBubbleBodySpriteOverride == null && runtimeChatBubbleBodySprite.texture != null)
+            {
+                Destroy(runtimeChatBubbleBodySprite.texture);
+            }
+
+            if (chatBubbleBodySpriteOverride == null)
+            {
+                Destroy(runtimeChatBubbleBodySprite);
+            }
+
+            runtimeChatBubbleBodySprite = null;
+        }
+
+        if (runtimeChatBubbleTailSprite != null)
+        {
+            if (runtimeChatBubbleTailSprite.texture != null)
+            {
+                Destroy(runtimeChatBubbleTailSprite.texture);
+            }
+
+            Destroy(runtimeChatBubbleTailSprite);
+            runtimeChatBubbleTailSprite = null;
         }
     }
 }
