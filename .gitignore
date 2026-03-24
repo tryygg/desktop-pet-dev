@@ -1,0 +1,35 @@
+# Unity generated folders
+/Library/
+/Temp/
+/Obj/
+/Build/
+/Builds/
+/Logs/
+/UserSettings/
+/MemoryCaptures/
+/Recordings/
+
+# IDE and generated project files
+/.vs/
+/.vscode/
+/*.csproj
+/*.sln
+/*.user
+/*.userprefs
+/*.pidb
+/*.booproj
+/*.svd
+/*.pdb
+/*.mdb
+/*.opendb
+/*.VC.db
+/*.pidb.meta
+/*.pdb.meta
+/*.mdb.meta
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# NuGet / build artifacts
+/obj/
