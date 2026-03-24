@@ -3,32 +3,45 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-public class AnimationUIController : MonoBehaviour
+public class 动画界面控制器 : MonoBehaviour
 {
     [Header("角色引用")]
     [Tooltip("拖入角色 Animator；为空时会自动查找场景中的第一个 Animator")]
+    [InspectorName("角色动画器")]
     public Animator characterAnimator;
 
     [Header("动画切换")]
     [Range(0f, 1f)]
+    [InspectorName("过渡时长")]
     public float transitionDuration = 0.25f;
 
     [Header("三维软件式相机操作")]
     [Tooltip("Alt + 左键拖拽：绕目标旋转")]
+    [InspectorName("环绕速度")]
     public float orbitSpeed = 180f;
     [Tooltip("中键拖拽：平移")]
+    [InspectorName("平移速度")]
     public float panSpeed = 0.0035f;
     [Tooltip("滚轮 / Alt + 右键拖拽：缩放")]
+    [InspectorName("缩放速度")]
     public float zoomSpeed = 4f;
+    [InspectorName("最小距离")]
     public float minDistance = 0.25f;
+    [InspectorName("最大距离")]
     public float maxDistance = 20f;
 
     [Header("UI 样式")]
+    [InspectorName("面板颜色")]
     public Color panelColor = new Color(0.06f, 0.09f, 0.16f, 0.82f);
+    [InspectorName("按钮常态颜色")]
     public Color buttonNormalColor = new Color(0.15f, 0.22f, 0.36f, 0.92f);
+    [InspectorName("按钮悬停颜色")]
     public Color buttonHoverColor = new Color(0.23f, 0.35f, 0.54f, 0.95f);
+    [InspectorName("按钮按下颜色")]
     public Color buttonPressedColor = new Color(0.11f, 0.17f, 0.28f, 1f);
+    [InspectorName("启用预览控制")]
     public bool enablePreviewControls = false;
+    [InspectorName("显示控制UI")]
     public bool showControlUI = false;
 
     private readonly string[] animationStates =
@@ -375,7 +388,7 @@ public class AnimationUIController : MonoBehaviour
             Vector2.zero, size - new Vector2(20f, 6f), new Color(0.91f, 0.97f, 1f, 1f),
             new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
 
-        UIButtonFeedback feedback = buttonObj.AddComponent<UIButtonFeedback>();
+        按钮反馈 feedback = buttonObj.AddComponent<按钮反馈>();
         feedback.targetImage = img;
         feedback.targetText = txt;
         feedback.normalColor = buttonNormalColor;
@@ -478,13 +491,18 @@ public class AnimationUIController : MonoBehaviour
     }
 }
 
-public class UIButtonFeedback : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerDownHandler, IPointerUpHandler
+public class 按钮反馈 : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerDownHandler, IPointerUpHandler
 {
+    [InspectorName("目标图片")]
     public Image targetImage;
+    [InspectorName("目标文本")]
     public Text targetText;
 
+    [InspectorName("常态颜色")]
     public Color normalColor = new Color(0.15f, 0.22f, 0.36f, 0.92f);
+    [InspectorName("悬停颜色")]
     public Color hoverColor = new Color(0.23f, 0.35f, 0.54f, 0.95f);
+    [InspectorName("按下颜色")]
     public Color pressedColor = new Color(0.11f, 0.17f, 0.28f, 1f);
 
     private readonly Color normalTextColor = new Color(0.91f, 0.97f, 1f, 1f);
