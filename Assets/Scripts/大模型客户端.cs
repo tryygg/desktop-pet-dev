@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.IO;
 using System.Text;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -46,6 +47,8 @@ public class 大模型客户端 : MonoBehaviour
     private string 接口密钥 = string.Empty;
     [SerializeField, FormerlySerializedAs("model"), InspectorName("模型名称")]
     private string 模型名称 = "gemini-3-flash-preview";
+    [SerializeField, InspectorName("密钥文件路径")]
+    private string 密钥文件路径 = "Assets/New Folder/秘钥.txt";
 
     public string apiUrl { get => 接口地址; set => 接口地址 = value; }
     public string apiKey { get => 接口密钥; set => 接口密钥 = value; }
@@ -105,6 +108,7 @@ public class 大模型客户端 : MonoBehaviour
     private void Awake()
     {
         自动补齐引用();
+        尝试从密钥文件加载接口密钥();
     }
 
     private void OnValidate()
@@ -147,12 +151,14 @@ public class 大模型客户端 : MonoBehaviour
 
     public bool 已完成接口配置()
     {
+        尝试从密钥文件加载接口密钥();
         return !string.IsNullOrWhiteSpace(apiUrl) && !string.IsNullOrWhiteSpace(apiKey);
     }
 
     public void 请求聊天回复(string userText, Action<string> onSuccess, Action<string> onError, bool 播放桌宠反馈 = true)
     {
         自动补齐引用();
+        尝试从密钥文件加载接口密钥();
 
         if (requestInFlight)
         {
@@ -184,6 +190,7 @@ public class 大模型客户端 : MonoBehaviour
     public void SendMessageToAI()
     {
         自动补齐引用();
+        尝试从密钥文件加载接口密钥();
 
         if (requestInFlight)
         {
@@ -292,6 +299,74 @@ public class 大模型客户端 : MonoBehaviour
             onSuccess?.Invoke(content);
             yield break;
         }
+    }
+
+    private void 尝试从密钥文件加载接口密钥()
+    {
+        string resolvedPath = 解析密钥文件路径();
+        if (string.IsNullOrWhiteSpace(resolvedPath) || !File.Exists(resolvedPath))
+        {
+            return;
+        }
+
+        try
+        {
+            string[] lines = File.ReadAllLines(resolvedPath, Encoding.UTF8);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string candidate = lines[i] != null ? lines[i].Trim() : string.Empty;
+                if (!string.IsNullOrWhiteSpace(candidate))
+                {
+                    接口密钥 = candidate;
+                    return;
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning("读取本地密钥文件失败: " + exception.Message);
+        }
+    }
+
+    private string 解析密钥文件路径()
+    {
+        string configuredPath = string.IsNullOrWhiteSpace(密钥文件路径) ? string.Empty : 密钥文件路径.Trim();
+        if (string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return 查找默认密钥文件();
+        }
+
+        if (Path.IsPathRooted(configuredPath))
+        {
+            return configuredPath;
+        }
+
+        string projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+        if (string.IsNullOrWhiteSpace(projectRoot))
+        {
+            return configuredPath;
+        }
+
+        string normalizedRelativePath = configuredPath.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+        return Path.GetFullPath(Path.Combine(projectRoot, normalizedRelativePath));
+    }
+
+    private string 查找默认密钥文件()
+    {
+        string projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+        if (string.IsNullOrWhiteSpace(projectRoot) || !Directory.Exists(projectRoot))
+        {
+            return string.Empty;
+        }
+
+        string[] candidateFiles = Directory.GetFiles(projectRoot, "秘钥.txt", SearchOption.AllDirectories);
+        if (candidateFiles.Length > 0)
+        {
+            return candidateFiles[0];
+        }
+
+        candidateFiles = Directory.GetFiles(projectRoot, "密钥.txt", SearchOption.AllDirectories);
+        return candidateFiles.Length > 0 ? candidateFiles[0] : string.Empty;
     }
 
     private void PlayThinkingFeedback()

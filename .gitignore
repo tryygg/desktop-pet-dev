@@ -33,3 +33,9 @@ Thumbs.db
 
 # NuGet / build artifacts
 /obj/
+
+# Local secrets
+**/秘钥.txt
+**/密钥.txt
+**/秘钥.txt.meta
+**/密钥.txt.meta
