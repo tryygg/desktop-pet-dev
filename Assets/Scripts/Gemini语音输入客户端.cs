@@ -33,6 +33,14 @@ public class Gemini语音输入客户端 : MonoBehaviour
     private int 最长录音秒数 = 20;
     [SerializeField, FormerlySerializedAs("minimumRecordSeconds"), InspectorName("最短录音秒数")]
     private float 最短录音秒数 = 0.35f;
+    [SerializeField, InspectorName("静音均方根阈值")]
+    private float 静音均方根阈值 = 0.008f;
+    [SerializeField, InspectorName("静音峰值阈值")]
+    private float 静音峰值阈值 = 0.045f;
+    [SerializeField, InspectorName("有效人声采样阈值")]
+    private float 有效人声采样阈值 = 0.02f;
+    [SerializeField, InspectorName("有效人声占比阈值")]
+    private float 有效人声占比阈值 = 0.003f;
 
     public bool 正在录音 => 正在录音中;
     public bool 正在转写 => 转写请求进行中;
@@ -171,6 +179,14 @@ public class Gemini语音输入客户端 : MonoBehaviour
             }
 
             onError?.Invoke("这次录音太短了，你再说一遍吧。");
+            yield break;
+        }
+
+        if (!检测到有效人声(trimmedClip, sampleCount))
+        {
+            转写请求进行中 = false;
+            Destroy(trimmedClip);
+            onError?.Invoke("我没听到你说话。");
             yield break;
         }
 
@@ -346,21 +362,133 @@ public class Gemini语音输入客户端 : MonoBehaviour
     {
         if (string.IsNullOrWhiteSpace(秘钥文件路径))
         {
-            return string.Empty;
+            return 查找默认密钥文件();
         }
 
-        if (Path.IsPathRooted(秘钥文件路径))
+        string configuredPath = 秘钥文件路径.Trim();
+        if (Path.IsPathRooted(configuredPath))
         {
-            return 秘钥文件路径;
+            return configuredPath;
         }
+
+        string normalizedRelativePath = configuredPath.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+        List<string> candidates = new List<string>();
 
         string projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
-        if (string.IsNullOrWhiteSpace(projectRoot))
+        if (!string.IsNullOrWhiteSpace(projectRoot))
         {
-            return 秘钥文件路径;
+            candidates.Add(Path.GetFullPath(Path.Combine(projectRoot, normalizedRelativePath)));
         }
 
-        return Path.Combine(projectRoot, 秘钥文件路径);
+        string currentDirectory = Environment.CurrentDirectory;
+        if (!string.IsNullOrWhiteSpace(currentDirectory))
+        {
+            candidates.Add(Path.GetFullPath(Path.Combine(currentDirectory, normalizedRelativePath)));
+        }
+
+        string executableDirectory = 获取可执行文件目录();
+        if (!string.IsNullOrWhiteSpace(executableDirectory))
+        {
+            candidates.Add(Path.GetFullPath(Path.Combine(executableDirectory, normalizedRelativePath)));
+        }
+
+        string persistentDirectory = Application.persistentDataPath;
+        if (!string.IsNullOrWhiteSpace(persistentDirectory))
+        {
+            candidates.Add(Path.GetFullPath(Path.Combine(persistentDirectory, normalizedRelativePath)));
+        }
+
+        string fileName = Path.GetFileName(normalizedRelativePath);
+        if (!string.IsNullOrWhiteSpace(fileName))
+        {
+            if (!string.IsNullOrWhiteSpace(currentDirectory))
+            {
+                candidates.Add(Path.Combine(currentDirectory, fileName));
+            }
+
+            if (!string.IsNullOrWhiteSpace(executableDirectory))
+            {
+                candidates.Add(Path.Combine(executableDirectory, fileName));
+            }
+
+            if (!string.IsNullOrWhiteSpace(persistentDirectory))
+            {
+                candidates.Add(Path.Combine(persistentDirectory, fileName));
+            }
+        }
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            if (File.Exists(candidates[i]))
+            {
+                return candidates[i];
+            }
+        }
+
+        string fallback = 查找默认密钥文件();
+        return string.IsNullOrWhiteSpace(fallback) ? (candidates.Count > 0 ? candidates[0] : normalizedRelativePath) : fallback;
+    }
+
+    private string 查找默认密钥文件()
+    {
+        List<string> searchRoots = new List<string>();
+
+        string projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+        if (!string.IsNullOrWhiteSpace(projectRoot) && Directory.Exists(projectRoot))
+        {
+            searchRoots.Add(projectRoot);
+        }
+
+        string currentDirectory = Environment.CurrentDirectory;
+        if (!string.IsNullOrWhiteSpace(currentDirectory) && Directory.Exists(currentDirectory) && !searchRoots.Contains(currentDirectory))
+        {
+            searchRoots.Add(currentDirectory);
+        }
+
+        string executableDirectory = 获取可执行文件目录();
+        if (!string.IsNullOrWhiteSpace(executableDirectory) && Directory.Exists(executableDirectory) && !searchRoots.Contains(executableDirectory))
+        {
+            searchRoots.Add(executableDirectory);
+        }
+
+        string persistentDirectory = Application.persistentDataPath;
+        if (!string.IsNullOrWhiteSpace(persistentDirectory) && Directory.Exists(persistentDirectory) && !searchRoots.Contains(persistentDirectory))
+        {
+            searchRoots.Add(persistentDirectory);
+        }
+
+        for (int i = 0; i < searchRoots.Count; i++)
+        {
+            string root = searchRoots[i];
+            string[] secretFiles = Directory.GetFiles(root, "秘钥.txt", SearchOption.AllDirectories);
+            if (secretFiles.Length > 0)
+            {
+                return secretFiles[0];
+            }
+
+            secretFiles = Directory.GetFiles(root, "密钥.txt", SearchOption.AllDirectories);
+            if (secretFiles.Length > 0)
+            {
+                return secretFiles[0];
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string 获取可执行文件目录()
+    {
+        try
+        {
+            string executablePath = System.Diagnostics.Process.GetCurrentProcess().MainModule != null
+                ? System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName
+                : string.Empty;
+            return string.IsNullOrWhiteSpace(executablePath) ? string.Empty : Path.GetDirectoryName(executablePath);
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private static string 提取回复文本(GeminiGenerateResponse response)
@@ -456,6 +584,47 @@ public class Gemini语音输入客户端 : MonoBehaviour
             false);
         trimmedClip.SetData(samples, 0);
         return trimmedClip;
+    }
+
+    private bool 检测到有效人声(AudioClip clip, int sampleCount)
+    {
+        if (clip == null || sampleCount <= 0)
+        {
+            return false;
+        }
+
+        int channelCount = Mathf.Max(1, clip.channels);
+        float[] samples = new float[sampleCount * channelCount];
+        clip.GetData(samples, 0);
+
+        double energy = 0d;
+        float peak = 0f;
+        int voicedCount = 0;
+        float gate = Mathf.Max(0.001f, 有效人声采样阈值);
+
+        for (int i = 0; i < samples.Length; i++)
+        {
+            float absolute = Mathf.Abs(samples[i]);
+            energy += absolute * absolute;
+            if (absolute > peak)
+            {
+                peak = absolute;
+            }
+
+            if (absolute >= gate)
+            {
+                voicedCount++;
+            }
+        }
+
+        float rms = samples.Length > 0 ? Mathf.Sqrt((float)(energy / samples.Length)) : 0f;
+        float voicedRatio = samples.Length > 0 ? voicedCount / (float)samples.Length : 0f;
+
+        bool clearlySilent = peak < Mathf.Max(0.001f, 静音峰值阈值)
+                             && rms < Mathf.Max(0.0005f, 静音均方根阈值)
+                             && voicedRatio < Mathf.Max(0.0005f, 有效人声占比阈值);
+
+        return !clearlySilent;
     }
 
     private void 停止麦克风(bool destroyClip)

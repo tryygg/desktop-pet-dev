@@ -2596,17 +2596,23 @@ public class 桌宠控制器 : MonoBehaviour
         iconRect.anchorMin = new Vector2(0.5f, 0.5f);
         iconRect.anchorMax = new Vector2(0.5f, 0.5f);
         iconRect.pivot = new Vector2(0.5f, 0.5f);
-        iconRect.sizeDelta = new Vector2(24f, 24f);
+        iconRect.sizeDelta = new Vector2(30f, 30f);
         iconRect.anchoredPosition = Vector2.zero;
         runtimeChatVoiceButtonIcon.color = new Color(0.98f, 0.99f, 1f, 1f);
+        runtimeChatVoiceButtonIcon.preserveAspect = true;
+        runtimeChatVoiceButtonIcon.type = Image.Type.Simple;
     }
 
     private Sprite GetVoiceMicSprite()
     {
         if (runtimeVoiceMicSprite == null)
         {
-            runtimeVoiceMicTexture = CreateVoiceIconTexture(CreateVoiceMicPixel);
-            runtimeVoiceMicSprite = CreateVoiceIconSprite(runtimeVoiceMicTexture);
+            runtimeVoiceMicSprite = Resources.Load<Sprite>("麦克风图标");
+            if (runtimeVoiceMicSprite == null)
+            {
+                runtimeVoiceMicTexture = CreateVoiceIconTexture(CreateVoiceMicPixel);
+                runtimeVoiceMicSprite = CreateVoiceIconSprite(runtimeVoiceMicTexture);
+            }
         }
 
         return runtimeVoiceMicSprite;
@@ -3987,19 +3993,31 @@ public class 桌宠控制器 : MonoBehaviour
 
         if (runtimeVoiceMicSprite != null)
         {
-            Destroy(runtimeVoiceMicSprite);
+            if (runtimeVoiceMicTexture != null)
+            {
+                Destroy(runtimeVoiceMicSprite);
+            }
+
             runtimeVoiceMicSprite = null;
         }
 
         if (runtimeVoiceStopSprite != null)
         {
-            Destroy(runtimeVoiceStopSprite);
+            if (runtimeVoiceStopTexture != null)
+            {
+                Destroy(runtimeVoiceStopSprite);
+            }
+
             runtimeVoiceStopSprite = null;
         }
 
         if (runtimeVoiceBusySprite != null)
         {
-            Destroy(runtimeVoiceBusySprite);
+            if (runtimeVoiceBusyTexture != null)
+            {
+                Destroy(runtimeVoiceBusySprite);
+            }
+
             runtimeVoiceBusySprite = null;
         }
 

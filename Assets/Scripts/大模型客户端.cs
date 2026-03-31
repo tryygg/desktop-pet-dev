@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEngine;
@@ -341,14 +342,62 @@ public class 大模型客户端 : MonoBehaviour
             return configuredPath;
         }
 
+        string normalizedRelativePath = configuredPath.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+        List<string> candidates = new List<string>();
+
         string projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
-        if (string.IsNullOrWhiteSpace(projectRoot))
+        if (!string.IsNullOrWhiteSpace(projectRoot))
         {
-            return configuredPath;
+            candidates.Add(Path.GetFullPath(Path.Combine(projectRoot, normalizedRelativePath)));
         }
 
-        string normalizedRelativePath = configuredPath.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
-        return Path.GetFullPath(Path.Combine(projectRoot, normalizedRelativePath));
+        string currentDirectory = Environment.CurrentDirectory;
+        if (!string.IsNullOrWhiteSpace(currentDirectory))
+        {
+            candidates.Add(Path.GetFullPath(Path.Combine(currentDirectory, normalizedRelativePath)));
+        }
+
+        string executableDirectory = 获取可执行文件目录();
+        if (!string.IsNullOrWhiteSpace(executableDirectory))
+        {
+            candidates.Add(Path.GetFullPath(Path.Combine(executableDirectory, normalizedRelativePath)));
+        }
+
+        string persistentDirectory = Application.persistentDataPath;
+        if (!string.IsNullOrWhiteSpace(persistentDirectory))
+        {
+            candidates.Add(Path.GetFullPath(Path.Combine(persistentDirectory, normalizedRelativePath)));
+        }
+
+        string fileName = Path.GetFileName(normalizedRelativePath);
+        if (!string.IsNullOrWhiteSpace(fileName))
+        {
+            if (!string.IsNullOrWhiteSpace(currentDirectory))
+            {
+                candidates.Add(Path.Combine(currentDirectory, fileName));
+            }
+
+            if (!string.IsNullOrWhiteSpace(executableDirectory))
+            {
+                candidates.Add(Path.Combine(executableDirectory, fileName));
+            }
+
+            if (!string.IsNullOrWhiteSpace(persistentDirectory))
+            {
+                candidates.Add(Path.Combine(persistentDirectory, fileName));
+            }
+        }
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            if (File.Exists(candidates[i]))
+            {
+                return candidates[i];
+            }
+        }
+
+        string fallback = 查找默认密钥文件();
+        return string.IsNullOrWhiteSpace(fallback) ? (candidates.Count > 0 ? candidates[0] : normalizedRelativePath) : fallback;
     }
 
     private string 查找默认密钥文件()
@@ -367,6 +416,21 @@ public class 大模型客户端 : MonoBehaviour
 
         candidateFiles = Directory.GetFiles(projectRoot, "密钥.txt", SearchOption.AllDirectories);
         return candidateFiles.Length > 0 ? candidateFiles[0] : string.Empty;
+    }
+
+    private static string 获取可执行文件目录()
+    {
+        try
+        {
+            string executablePath = System.Diagnostics.Process.GetCurrentProcess().MainModule != null
+                ? System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName
+                : string.Empty;
+            return string.IsNullOrWhiteSpace(executablePath) ? string.Empty : Path.GetDirectoryName(executablePath);
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private void PlayThinkingFeedback()
