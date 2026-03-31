@@ -39,3 +39,7 @@ Thumbs.db
 **/密钥.txt
 **/秘钥.txt.meta
 **/密钥.txt.meta
+
+# Python cache
+**/__pycache__/
+**/*.pyc

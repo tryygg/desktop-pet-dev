@@ -23,6 +23,8 @@ public class 桌宠控制器 : MonoBehaviour
     private 大模型客户端 大模型客户端引用;
     [SerializeField, InspectorName("GPT-SoVITS客户端")]
     private GPTSoVITS客户端 GPTSoVITS客户端引用;
+    [SerializeField, InspectorName("Gemini语音输入客户端")]
+    private Gemini语音输入客户端 Gemini语音输入客户端引用;
 
     public Animator characterAnimator { get => 角色动画器; set => 角色动画器 = value; }
     public Transform visualRoot { get => 视觉根节点; set => 视觉根节点 = value; }
@@ -31,6 +33,7 @@ public class 桌宠控制器 : MonoBehaviour
     public Canvas sceneUiCanvas { get => 场景UI画布; set => 场景UI画布 = value; }
     public 大模型客户端 llmClient { get => 大模型客户端引用; set => 大模型客户端引用 = value; }
     public GPTSoVITS客户端 gptSoVITSClient { get => GPTSoVITS客户端引用; set => GPTSoVITS客户端引用 = value; }
+    public Gemini语音输入客户端 geminiVoiceInputClient { get => Gemini语音输入客户端引用; set => Gemini语音输入客户端引用 = value; }
 
     [Header("动画")]
     [SerializeField, FormerlySerializedAs("initialStateName"), InspectorName("初始状态名")]
@@ -130,7 +133,7 @@ public class 桌宠控制器 : MonoBehaviour
 
     [Header("对话")]
     [SerializeField, FormerlySerializedAs("chatDockSize"), InspectorName("对话框尺寸")]
-    private Vector2 对话框尺寸 = new Vector2(304f, 92f);
+    private Vector2 对话框尺寸 = new Vector2(420f, 104f);
     [SerializeField, FormerlySerializedAs("chatDockOffset"), InspectorName("对话框偏移")]
     private Vector2 对话框偏移 = new Vector2(44f, 24f);
     [SerializeField, FormerlySerializedAs("chatPanelSize"), InspectorName("聊天面板尺寸")]
@@ -275,6 +278,9 @@ public class 桌宠控制器 : MonoBehaviour
     private Text runtimeChatHistoryText;
     private Text runtimeChatBubbleText;
     private Text runtimeLoadingText;
+    private Text runtimeChatPlaceholderText;
+    private Text runtimeChatVoiceButtonLabel;
+    private Image runtimeChatVoiceButtonIcon;
     private InputField runtimeChatInputField;
     private bool pendingChatSubmitFromInputField;
     private ScrollRect runtimeChatHistoryScrollRect;
@@ -293,8 +299,15 @@ public class 桌宠控制器 : MonoBehaviour
     private Outline runtimeChatBubbleOutline;
     private Sprite runtimeChatBubbleBodySprite;
     private Sprite runtimeChatBubbleTailSprite;
+    private Sprite runtimeVoiceMicSprite;
+    private Sprite runtimeVoiceStopSprite;
+    private Sprite runtimeVoiceBusySprite;
     private Texture2D runtimeChatBubbleProcessedTexture;
+    private Texture2D runtimeVoiceMicTexture;
+    private Texture2D runtimeVoiceStopTexture;
+    private Texture2D runtimeVoiceBusyTexture;
     private Button runtimeChatSendButton;
+    private Button runtimeChatVoiceButton;
     private Button runtimeChatCloseButton;
     private Button runtimeChatHistoryButton;
     private Button runtimeChatHistoryCloseButton;
@@ -320,6 +333,11 @@ public class 桌宠控制器 : MonoBehaviour
     private const string ChatHeaderLabel = "\u804a\u5929";
     private const string ChatInputPlaceholderLabel = "\u8f93\u5165\u4f60\u60f3\u8bf4\u7684\u8bdd...";
     private const string ChatSendLabel = "\u53d1\u9001";
+    private const string ChatVoiceLabel = "\u8bed\u97f3";
+    private const string ChatVoiceStopLabel = "\u505c\u6b62";
+    private const string ChatVoiceProcessingLabel = "\u8bc6\u522b";
+    private const string ChatVoiceListeningHint = "\u6b63\u5728\u542c\u4f60\u8bf4\u8bdd...";
+    private const string ChatVoiceProcessingHint = "\u6b63\u5728\u8bc6\u522b\u8bed\u97f3...";
     private const string ChatCloseLabel = "\u5173\u95ed";
     private const string ChatHistoryLabel = "\u5386\u53f2";
     private const string ChatHistoryHeaderLabel = "\u5bf9\u8bdd\u8bb0\u5f55";
@@ -515,6 +533,16 @@ public class 桌宠控制器 : MonoBehaviour
         if (gptSoVITSClient == null)
         {
             gptSoVITSClient = FindObjectOfType<GPTSoVITS客户端>();
+        }
+
+        if (Gemini语音输入客户端引用 == null)
+        {
+            Gemini语音输入客户端引用 = GetComponent<Gemini语音输入客户端>();
+        }
+
+        if (Gemini语音输入客户端引用 == null)
+        {
+            Gemini语音输入客户端引用 = gameObject.AddComponent<Gemini语音输入客户端>();
         }
     }
 
@@ -1559,8 +1587,10 @@ public class 桌宠控制器 : MonoBehaviour
 
     private Rect BuildChatPanelRect()
     {
-        float width = Mathf.Clamp(chatDockSize.x, 240f, Mathf.Max(240f, windowController.WindowSize.x - 16f));
-        float height = Mathf.Clamp(chatDockSize.y, 74f, Mathf.Max(74f, windowController.WindowSize.y - 16f));
+        float minWidth = Mathf.Min(420f, Mathf.Max(320f, windowController.WindowSize.x - 16f));
+        float minHeight = Mathf.Min(104f, Mathf.Max(82f, windowController.WindowSize.y - 16f));
+        float width = Mathf.Clamp(chatDockSize.x, minWidth, Mathf.Max(minWidth, windowController.WindowSize.x - 16f));
+        float height = Mathf.Clamp(chatDockSize.y, minHeight, Mathf.Max(minHeight, windowController.WindowSize.y - 16f));
         RectInt petRect = GetPetClientRectOrFallback();
 
         Rect panelRect = new Rect(
@@ -1871,6 +1901,7 @@ public class 桌宠控制器 : MonoBehaviour
 
         UpdateRuntimeChatVisuals();
         runtimeChatPanelRoot.gameObject.SetActive(true);
+        RefreshChatInputControlsState();
         RefreshRuntimeCanvasVisibility();
         if (showGreetingBubble)
         {
@@ -1888,6 +1919,11 @@ public class 桌宠控制器 : MonoBehaviour
 
     private void CloseChatPanel()
     {
+        if (Gemini语音输入客户端引用 != null && Gemini语音输入客户端引用.正在录音)
+        {
+            Gemini语音输入客户端引用.取消录音();
+        }
+
         chatPanelOpen = false;
         chatHistoryOpen = false;
         draggingChatPanel = false;
@@ -1908,6 +1944,7 @@ public class 桌宠控制器 : MonoBehaviour
         }
 
         HidePetChatBubble(false);
+        RefreshChatInputControlsState();
         RefreshRuntimeCanvasVisibility();
 
         if (autoFitWindowToPet && windowController != null && windowController.IsReady && !menuOpen)
@@ -2087,7 +2124,9 @@ public class 桌宠控制器 : MonoBehaviour
         TryBindExistingSceneUi();
         if (runtimeChatPanelRoot != null)
         {
+            EnsureChatVoiceButton();
             RebindChatButtonListeners();
+            RefreshChatInputControlsState();
             return;
         }
 
@@ -2106,7 +2145,7 @@ public class 桌宠控制器 : MonoBehaviour
         headerRect.anchorMax = new Vector2(1f, 1f);
         headerRect.pivot = new Vector2(0.5f, 1f);
         headerRect.anchoredPosition = new Vector2(0f, -12f);
-        headerRect.sizeDelta = new Vector2(-144f, 26f);
+        headerRect.sizeDelta = new Vector2(-128f, 26f);
         runtimeChatHeader.alignment = TextAnchor.MiddleLeft;
         runtimeChatHeader.text = ChatHeaderLabel;
         runtimeChatHeader.color = new Color(0.96f, 0.97f, 0.99f, 1f);
@@ -2116,8 +2155,8 @@ public class 桌宠控制器 : MonoBehaviour
         historyButtonRect.anchorMin = new Vector2(1f, 1f);
         historyButtonRect.anchorMax = new Vector2(1f, 1f);
         historyButtonRect.pivot = new Vector2(1f, 1f);
-        historyButtonRect.sizeDelta = new Vector2(54f, 24f);
-        historyButtonRect.anchoredPosition = new Vector2(-72f, -8f);
+        historyButtonRect.sizeDelta = new Vector2(52f, 24f);
+        historyButtonRect.anchoredPosition = new Vector2(-68f, -8f);
         runtimeChatHistoryButton.onClick.AddListener(ToggleChatHistoryPanel);
 
         GameObject closeButtonObject = CreateChatButtonObject("ChatCloseButton", panelObject.transform, ChatCloseLabel, out runtimeChatCloseButton);
@@ -2125,7 +2164,7 @@ public class 桌宠控制器 : MonoBehaviour
         closeRect.anchorMin = new Vector2(1f, 1f);
         closeRect.anchorMax = new Vector2(1f, 1f);
         closeRect.pivot = new Vector2(1f, 1f);
-        closeRect.sizeDelta = new Vector2(54f, 24f);
+        closeRect.sizeDelta = new Vector2(52f, 24f);
         closeRect.anchoredPosition = new Vector2(-10f, -8f);
         runtimeChatCloseButton.onClick.AddListener(CloseChatPanel);
 
@@ -2135,8 +2174,8 @@ public class 桌宠控制器 : MonoBehaviour
         inputBackgroundRect.anchorMin = new Vector2(0f, 0f);
         inputBackgroundRect.anchorMax = new Vector2(1f, 0f);
         inputBackgroundRect.pivot = new Vector2(0.5f, 0f);
-        inputBackgroundRect.sizeDelta = new Vector2(-88f, 56f);
-        inputBackgroundRect.anchoredPosition = new Vector2(-34f, 10f);
+        inputBackgroundRect.sizeDelta = new Vector2(-144f, 56f);
+        inputBackgroundRect.anchoredPosition = new Vector2(-62f, 10f);
         Image inputBackground = inputBackgroundObject.AddComponent<Image>();
         inputBackground.color = GetRuntimeMenuColor(new Color(0.16f, 0.19f, 0.25f, 1f));
 
@@ -2165,16 +2204,26 @@ public class 桌宠控制器 : MonoBehaviour
         placeholderText.alignment = TextAnchor.UpperLeft;
         placeholderText.color = new Color(0.68f, 0.72f, 0.78f, 1f);
         placeholderText.text = ChatInputPlaceholderLabel;
+        runtimeChatPlaceholderText = placeholderText;
 
         runtimeChatInputField.textComponent = inputText;
         runtimeChatInputField.placeholder = placeholderText;
+
+        GameObject voiceButtonObject = CreateChatButtonObject("ChatVoiceButton", panelObject.transform, ChatVoiceLabel, out runtimeChatVoiceButton, out runtimeChatVoiceButtonLabel);
+        RectTransform voiceRect = voiceButtonObject.GetComponent<RectTransform>();
+        voiceRect.anchorMin = new Vector2(1f, 0f);
+        voiceRect.anchorMax = new Vector2(1f, 0f);
+        voiceRect.pivot = new Vector2(1f, 0f);
+        voiceRect.sizeDelta = new Vector2(52f, 56f);
+        voiceRect.anchoredPosition = new Vector2(-66f, 10f);
+        runtimeChatVoiceButton.onClick.AddListener(ToggleVoiceInput);
 
         GameObject sendButtonObject = CreateChatButtonObject("ChatSendButton", panelObject.transform, ChatSendLabel, out runtimeChatSendButton);
         RectTransform sendRect = sendButtonObject.GetComponent<RectTransform>();
         sendRect.anchorMin = new Vector2(1f, 0f);
         sendRect.anchorMax = new Vector2(1f, 0f);
         sendRect.pivot = new Vector2(1f, 0f);
-        sendRect.sizeDelta = new Vector2(70f, 56f);
+        sendRect.sizeDelta = new Vector2(52f, 56f);
         sendRect.anchoredPosition = new Vector2(-10f, 10f);
         runtimeChatSendButton.onClick.AddListener(SubmitChatMessage);
 
@@ -2293,6 +2342,7 @@ public class 桌宠控制器 : MonoBehaviour
         runtimeChatPanelRoot.gameObject.SetActive(false);
         runtimeChatHistoryPanelRoot.gameObject.SetActive(false);
         runtimeChatBubbleRoot.gameObject.SetActive(false);
+        RefreshChatInputControlsState();
     }
 
     private void EnsureRuntimeLoadingOverlay()
@@ -2480,6 +2530,11 @@ public class 桌宠控制器 : MonoBehaviour
 
     private GameObject CreateChatButtonObject(string objectName, Transform parent, string label, out Button button)
     {
+        return CreateChatButtonObject(objectName, parent, label, out button, out _);
+    }
+
+    private GameObject CreateChatButtonObject(string objectName, Transform parent, string label, out Button button, out Text buttonLabel)
+    {
         GameObject buttonObject = new GameObject(objectName);
         buttonObject.transform.SetParent(parent, false);
         buttonObject.AddComponent<RectTransform>();
@@ -2488,7 +2543,7 @@ public class 桌宠控制器 : MonoBehaviour
         button = buttonObject.AddComponent<Button>();
         button.targetGraphic = buttonBackground;
 
-        Text buttonLabel = CreateRuntimeMenuText("Label", buttonObject.transform, 12, FontStyle.Bold);
+        buttonLabel = CreateRuntimeMenuText("Label", buttonObject.transform, 12, FontStyle.Bold);
         RectTransform labelRect = buttonLabel.rectTransform;
         labelRect.anchorMin = Vector2.zero;
         labelRect.anchorMax = Vector2.one;
@@ -2499,6 +2554,303 @@ public class 桌宠控制器 : MonoBehaviour
         buttonLabel.text = label;
 
         return buttonObject;
+    }
+
+    private void EnsureVoiceButtonIcon()
+    {
+        if (runtimeChatVoiceButton == null)
+        {
+            return;
+        }
+
+        RectTransform buttonRect = runtimeChatVoiceButton.GetComponent<RectTransform>();
+        if (buttonRect == null)
+        {
+            return;
+        }
+
+        if (runtimeChatVoiceButtonLabel != null)
+        {
+            runtimeChatVoiceButtonLabel.text = string.Empty;
+            runtimeChatVoiceButtonLabel.gameObject.SetActive(false);
+        }
+
+        if (runtimeChatVoiceButtonIcon == null)
+        {
+            Transform iconTransform = runtimeChatVoiceButton.transform.Find("Icon");
+            if (iconTransform != null)
+            {
+                runtimeChatVoiceButtonIcon = iconTransform.GetComponent<Image>();
+            }
+        }
+
+        if (runtimeChatVoiceButtonIcon == null)
+        {
+            GameObject iconObject = new GameObject("Icon");
+            iconObject.transform.SetParent(runtimeChatVoiceButton.transform, false);
+            runtimeChatVoiceButtonIcon = iconObject.AddComponent<Image>();
+            runtimeChatVoiceButtonIcon.raycastTarget = false;
+        }
+
+        RectTransform iconRect = runtimeChatVoiceButtonIcon.rectTransform;
+        iconRect.anchorMin = new Vector2(0.5f, 0.5f);
+        iconRect.anchorMax = new Vector2(0.5f, 0.5f);
+        iconRect.pivot = new Vector2(0.5f, 0.5f);
+        iconRect.sizeDelta = new Vector2(24f, 24f);
+        iconRect.anchoredPosition = Vector2.zero;
+        runtimeChatVoiceButtonIcon.color = new Color(0.98f, 0.99f, 1f, 1f);
+    }
+
+    private Sprite GetVoiceMicSprite()
+    {
+        if (runtimeVoiceMicSprite == null)
+        {
+            runtimeVoiceMicTexture = CreateVoiceIconTexture(CreateVoiceMicPixel);
+            runtimeVoiceMicSprite = CreateVoiceIconSprite(runtimeVoiceMicTexture);
+        }
+
+        return runtimeVoiceMicSprite;
+    }
+
+    private Sprite GetVoiceStopSprite()
+    {
+        if (runtimeVoiceStopSprite == null)
+        {
+            runtimeVoiceStopTexture = CreateVoiceIconTexture(CreateVoiceStopPixel);
+            runtimeVoiceStopSprite = CreateVoiceIconSprite(runtimeVoiceStopTexture);
+        }
+
+        return runtimeVoiceStopSprite;
+    }
+
+    private Sprite GetVoiceBusySprite()
+    {
+        if (runtimeVoiceBusySprite == null)
+        {
+            runtimeVoiceBusyTexture = CreateVoiceIconTexture(CreateVoiceBusyPixel);
+            runtimeVoiceBusySprite = CreateVoiceIconSprite(runtimeVoiceBusyTexture);
+        }
+
+        return runtimeVoiceBusySprite;
+    }
+
+    private static Sprite CreateVoiceIconSprite(Texture2D texture)
+    {
+        return texture == null
+            ? null
+            : Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(0.5f, 0.5f), texture.width);
+    }
+
+    private static Texture2D CreateVoiceIconTexture(System.Func<float, float, bool> fillPredicate)
+    {
+        const int size = 64;
+        Texture2D texture = new Texture2D(size, size, TextureFormat.RGBA32, false, false)
+        {
+            filterMode = FilterMode.Bilinear,
+            wrapMode = TextureWrapMode.Clamp
+        };
+
+        Color32[] pixels = new Color32[size * size];
+        Color32 opaque = new Color32(255, 255, 255, 255);
+        Color32 transparent = new Color32(255, 255, 255, 0);
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float nx = (x + 0.5f) / size;
+                float ny = (y + 0.5f) / size;
+                pixels[y * size + x] = fillPredicate(nx, ny) ? opaque : transparent;
+            }
+        }
+
+        texture.SetPixels32(pixels);
+        texture.Apply(false, false);
+        return texture;
+    }
+
+    private static bool CreateVoiceMicPixel(float x, float y)
+    {
+        bool capsule = InRoundedRect(x, y, 0.31f, 0.52f, 0.69f, 0.85f, 0.18f);
+        bool stem = x >= 0.46f && x <= 0.54f && y >= 0.28f && y <= 0.52f;
+        bool foot = x >= 0.36f && x <= 0.64f && y >= 0.18f && y <= 0.24f;
+        bool arc = y >= 0.34f && y <= 0.60f && Mathf.Abs(x - 0.5f) >= 0.18f && Mathf.Abs(x - 0.5f) <= 0.23f;
+        return capsule || stem || foot || arc;
+    }
+
+    private static bool CreateVoiceStopPixel(float x, float y)
+    {
+        return x >= 0.28f && x <= 0.72f && y >= 0.28f && y <= 0.72f;
+    }
+
+    private static bool CreateVoiceBusyPixel(float x, float y)
+    {
+        return InCircle(x, y, 0.28f, 0.5f, 0.08f)
+               || InCircle(x, y, 0.5f, 0.5f, 0.08f)
+               || InCircle(x, y, 0.72f, 0.5f, 0.08f);
+    }
+
+    private static bool InCircle(float x, float y, float cx, float cy, float radius)
+    {
+        float dx = x - cx;
+        float dy = y - cy;
+        return dx * dx + dy * dy <= radius * radius;
+    }
+
+    private static bool InRoundedRect(float x, float y, float xMin, float yMin, float xMax, float yMax, float radius)
+    {
+        if (x < xMin || x > xMax || y < yMin || y > yMax)
+        {
+            return false;
+        }
+
+        float clampedX = Mathf.Clamp(x, xMin + radius, xMax - radius);
+        float clampedY = Mathf.Clamp(y, yMin + radius, yMax - radius);
+        float dx = x - clampedX;
+        float dy = y - clampedY;
+        return dx * dx + dy * dy <= radius * radius;
+    }
+
+    private void EnsureChatVoiceButton()
+    {
+        if (runtimeChatPanelRoot == null)
+        {
+            return;
+        }
+
+        Transform inputBackground = runtimeChatPanelRoot.Find("ChatInputBackground");
+        if (inputBackground != null)
+        {
+            RectTransform inputRect = inputBackground as RectTransform;
+            if (inputRect != null)
+            {
+                inputRect.sizeDelta = new Vector2(-144f, 56f);
+                inputRect.anchoredPosition = new Vector2(-62f, 10f);
+            }
+
+            if (runtimeChatPlaceholderText == null)
+            {
+                runtimeChatPlaceholderText = inputBackground.Find("Placeholder")?.GetComponent<Text>();
+            }
+        }
+
+        Transform sendButtonTransform = runtimeChatPanelRoot.Find("ChatSendButton");
+        if (sendButtonTransform != null)
+        {
+            RectTransform sendRect = sendButtonTransform as RectTransform;
+            if (sendRect != null)
+            {
+                sendRect.sizeDelta = new Vector2(52f, 56f);
+                sendRect.anchoredPosition = new Vector2(-10f, 10f);
+            }
+        }
+
+        if (runtimeChatVoiceButton == null)
+        {
+            Transform voiceButtonTransform = runtimeChatPanelRoot.Find("ChatVoiceButton");
+            if (voiceButtonTransform != null)
+            {
+                runtimeChatVoiceButton = voiceButtonTransform.GetComponent<Button>();
+                runtimeChatVoiceButtonLabel = voiceButtonTransform.Find("Label")?.GetComponent<Text>();
+            }
+        }
+
+        if (runtimeChatVoiceButton == null)
+        {
+            GameObject voiceButtonObject = CreateChatButtonObject("ChatVoiceButton", runtimeChatPanelRoot, ChatVoiceLabel, out runtimeChatVoiceButton, out runtimeChatVoiceButtonLabel);
+            RectTransform voiceRect = voiceButtonObject.GetComponent<RectTransform>();
+            voiceRect.anchorMin = new Vector2(1f, 0f);
+            voiceRect.anchorMax = new Vector2(1f, 0f);
+            voiceRect.pivot = new Vector2(1f, 0f);
+            voiceRect.sizeDelta = new Vector2(52f, 56f);
+            voiceRect.anchoredPosition = new Vector2(-66f, 10f);
+        }
+        else
+        {
+            RectTransform voiceRect = runtimeChatVoiceButton.GetComponent<RectTransform>();
+            if (voiceRect != null)
+            {
+                voiceRect.anchorMin = new Vector2(1f, 0f);
+                voiceRect.anchorMax = new Vector2(1f, 0f);
+                voiceRect.pivot = new Vector2(1f, 0f);
+                voiceRect.sizeDelta = new Vector2(52f, 56f);
+                voiceRect.anchoredPosition = new Vector2(-66f, 10f);
+            }
+        }
+
+        EnsureVoiceButtonIcon();
+        RefreshVoiceInputButtonVisuals();
+    }
+
+    private void RefreshChatInputControlsState()
+    {
+        bool isVoiceRecording = Gemini语音输入客户端引用 != null && Gemini语音输入客户端引用.正在录音;
+        bool isVoiceBusy = Gemini语音输入客户端引用 != null && Gemini语音输入客户端引用.正在转写;
+        bool chatControlsInteractable = !chatRequestInFlight && !isVoiceRecording && !isVoiceBusy;
+
+        if (runtimeChatInputField != null)
+        {
+            runtimeChatInputField.interactable = chatControlsInteractable;
+        }
+
+        if (runtimeChatSendButton != null)
+        {
+            runtimeChatSendButton.interactable = chatControlsInteractable;
+        }
+
+        if (runtimeChatVoiceButton != null)
+        {
+            runtimeChatVoiceButton.interactable = !chatRequestInFlight && !isVoiceBusy;
+        }
+
+        if (runtimeChatPlaceholderText != null)
+        {
+            if (isVoiceRecording)
+            {
+                runtimeChatPlaceholderText.text = ChatVoiceListeningHint;
+            }
+            else if (isVoiceBusy)
+            {
+                runtimeChatPlaceholderText.text = ChatVoiceProcessingHint;
+            }
+            else
+            {
+                runtimeChatPlaceholderText.text = ChatInputPlaceholderLabel;
+            }
+        }
+
+        RefreshVoiceInputButtonVisuals();
+    }
+
+    private void RefreshVoiceInputButtonVisuals()
+    {
+        if (runtimeChatVoiceButtonLabel != null)
+        {
+            runtimeChatVoiceButtonLabel.text = string.Empty;
+            runtimeChatVoiceButtonLabel.gameObject.SetActive(false);
+        }
+
+        if (runtimeChatVoiceButton != null && runtimeChatVoiceButton.targetGraphic is Image voiceButtonImage)
+        {
+            bool isRecording = Gemini语音输入客户端引用 != null && Gemini语音输入客户端引用.正在录音;
+            voiceButtonImage.color = GetRuntimeMenuColor(isRecording ? menuActiveColor : menuHoverColor);
+        }
+
+        if (runtimeChatVoiceButtonIcon != null)
+        {
+            if (Gemini语音输入客户端引用 != null && Gemini语音输入客户端引用.正在录音)
+            {
+                runtimeChatVoiceButtonIcon.sprite = GetVoiceStopSprite();
+            }
+            else if (Gemini语音输入客户端引用 != null && Gemini语音输入客户端引用.正在转写)
+            {
+                runtimeChatVoiceButtonIcon.sprite = GetVoiceBusySprite();
+            }
+            else
+            {
+                runtimeChatVoiceButtonIcon.sprite = GetVoiceMicSprite();
+            }
+        }
     }
 
     private void EnsureBubbleSprites()
@@ -2573,9 +2925,12 @@ public class 桌宠控制器 : MonoBehaviour
                 if (inputBackground != null)
                 {
                     runtimeChatInputField = inputBackground.GetComponent<InputField>();
+                    runtimeChatPlaceholderText = inputBackground.Find("Placeholder")?.GetComponent<Text>();
                     ConfigureRuntimeChatInputField();
                 }
 
+                runtimeChatVoiceButton = chatPanel.Find("ChatVoiceButton")?.GetComponent<Button>();
+                runtimeChatVoiceButtonLabel = chatPanel.Find("ChatVoiceButton/Label")?.GetComponent<Text>();
                 runtimeChatSendButton = chatPanel.Find("ChatSendButton")?.GetComponent<Button>();
             }
         }
@@ -2626,6 +2981,8 @@ public class 桌宠控制器 : MonoBehaviour
                 runtimeLoadingText = loadingRoot.Find("LoadingText")?.GetComponent<Text>();
             }
         }
+
+        EnsureChatVoiceButton();
     }
 
     private void RebindChatButtonListeners()
@@ -2648,11 +3005,19 @@ public class 桌宠控制器 : MonoBehaviour
             runtimeChatSendButton.onClick.AddListener(SubmitChatMessage);
         }
 
+        if (runtimeChatVoiceButton != null)
+        {
+            runtimeChatVoiceButton.onClick.RemoveAllListeners();
+            runtimeChatVoiceButton.onClick.AddListener(ToggleVoiceInput);
+        }
+
         if (runtimeChatHistoryCloseButton != null)
         {
             runtimeChatHistoryCloseButton.onClick.RemoveAllListeners();
             runtimeChatHistoryCloseButton.onClick.AddListener(ToggleChatHistoryPanel);
         }
+
+        RefreshChatInputControlsState();
     }
 
     private void DestroyUiObject(Object target)
@@ -2907,43 +3272,52 @@ public class 桌宠控制器 : MonoBehaviour
 
     private void SubmitChatMessage()
     {
-        if (runtimeChatInputField == null)
-        {
-            return;
-        }
+        SubmitChatMessageCore(runtimeChatInputField != null ? runtimeChatInputField.text : string.Empty, true);
+    }
 
+    public void 提交外部聊天消息(string message)
+    {
+        SubmitChatMessageCore(message, false);
+    }
+
+    private void SubmitChatMessageCore(string rawMessage, bool clearInputField)
+    {
         if (chatRequestInFlight)
         {
-            runtimeChatInputField.Select();
-            runtimeChatInputField.ActivateInputField();
+            if (runtimeChatInputField != null)
+            {
+                runtimeChatInputField.Select();
+                runtimeChatInputField.ActivateInputField();
+            }
+
             return;
         }
 
-        string userMessage = runtimeChatInputField.text.Trim();
+        string userMessage = string.IsNullOrWhiteSpace(rawMessage) ? string.Empty : rawMessage.Trim();
         if (string.IsNullOrEmpty(userMessage))
         {
-            runtimeChatInputField.Select();
-            runtimeChatInputField.ActivateInputField();
+            if (runtimeChatInputField != null)
+            {
+                runtimeChatInputField.Select();
+                runtimeChatInputField.ActivateInputField();
+            }
+
             return;
         }
 
         AppendChatLine("\u6211", userMessage);
-        runtimeChatInputField.text = string.Empty;
+        if (clearInputField && runtimeChatInputField != null)
+        {
+            runtimeChatInputField.text = string.Empty;
+        }
+
         UpdateRuntimeChatVisuals();
         ExpandWindowRegionForChatUI();
 
         if (llmClient != null && llmClient.已完成接口配置())
         {
             chatRequestInFlight = true;
-            if (runtimeChatInputField != null)
-            {
-                runtimeChatInputField.interactable = false;
-            }
-
-            if (runtimeChatSendButton != null)
-            {
-                runtimeChatSendButton.interactable = false;
-            }
+            RefreshChatInputControlsState();
 
             ShowPetChatBubble("\u601d\u8003\u4e2d...", null, false);
             llmClient.请求聊天回复(
@@ -2958,8 +3332,11 @@ public class 桌宠控制器 : MonoBehaviour
             PresentAssistantReply(reply);
         }
 
-        runtimeChatInputField.Select();
-        runtimeChatInputField.ActivateInputField();
+        if (runtimeChatInputField != null)
+        {
+            runtimeChatInputField.Select();
+            runtimeChatInputField.ActivateInputField();
+        }
     }
 
     private void HandleLargeModelReplySuccess(string reply)
@@ -2999,15 +3376,79 @@ public class 桌宠控制器 : MonoBehaviour
 
     private void SetChatRequestControlsInteractable(bool interactable)
     {
-        if (runtimeChatInputField != null)
+        RefreshChatInputControlsState();
+    }
+
+    private void ToggleVoiceInput()
+    {
+        ResolveReferences();
+        if (Gemini语音输入客户端引用 == null)
         {
-            runtimeChatInputField.interactable = interactable;
+            Debug.LogWarning("Gemini语音输入客户端不可用。");
+            return;
         }
 
-        if (runtimeChatSendButton != null)
+        if (Gemini语音输入客户端引用.正在录音)
         {
-            runtimeChatSendButton.interactable = interactable;
+            ShowPetChatBubble(ChatVoiceProcessingHint, null, false);
+            Gemini语音输入客户端引用.停止录音并转写(HandleVoiceTranscriptionSuccess, HandleVoiceTranscriptionError);
+            RefreshChatInputControlsState();
+            return;
         }
+
+        if (chatRequestInFlight || Gemini语音输入客户端引用.正在转写)
+        {
+            return;
+        }
+
+        if (gptSoVITSClient != null)
+        {
+            AudioSource ttsAudioSource = gptSoVITSClient.GetComponent<AudioSource>();
+            if (ttsAudioSource != null && ttsAudioSource.isPlaying)
+            {
+                ttsAudioSource.Stop();
+            }
+        }
+
+        if (!Gemini语音输入客户端引用.开始录音(out string error))
+        {
+            HandleVoiceTranscriptionError(error);
+            return;
+        }
+
+        PlayInitialState(transitionDuration);
+        RefreshChatInputControlsState();
+        ShowPetChatBubble(ChatVoiceListeningHint, null, false);
+    }
+
+    private void HandleVoiceTranscriptionSuccess(string message)
+    {
+        RefreshChatInputControlsState();
+
+        string finalMessage = string.IsNullOrWhiteSpace(message) ? string.Empty : message.Trim();
+        if (string.IsNullOrEmpty(finalMessage))
+        {
+            HandleVoiceTranscriptionError("\u6211\u8fd9\u6b21\u6ca1\u542c\u6e05\uff0c\u4f60\u518d\u8bf4\u4e00\u904d\u5427\u3002");
+            return;
+        }
+
+        if (runtimeChatInputField != null)
+        {
+            runtimeChatInputField.text = finalMessage;
+        }
+
+        SubmitChatMessageCore(finalMessage, true);
+    }
+
+    private void HandleVoiceTranscriptionError(string error)
+    {
+        RefreshChatInputControlsState();
+        string finalError = string.IsNullOrWhiteSpace(error)
+            ? "\u6211\u8fd9\u6b21\u6ca1\u542c\u6e05\uff0c\u4f60\u518d\u8bf4\u4e00\u904d\u5427\u3002"
+            : error.Trim();
+
+        Debug.LogWarning("Gemini语音识别失败。 " + finalError);
+        ShowPetChatBubble(finalError, 2.8f);
     }
 
     private void PresentAssistantReply(string reply)
@@ -3542,6 +3983,42 @@ public class 桌宠控制器 : MonoBehaviour
 
             Destroy(runtimeChatBubbleTailSprite);
             runtimeChatBubbleTailSprite = null;
+        }
+
+        if (runtimeVoiceMicSprite != null)
+        {
+            Destroy(runtimeVoiceMicSprite);
+            runtimeVoiceMicSprite = null;
+        }
+
+        if (runtimeVoiceStopSprite != null)
+        {
+            Destroy(runtimeVoiceStopSprite);
+            runtimeVoiceStopSprite = null;
+        }
+
+        if (runtimeVoiceBusySprite != null)
+        {
+            Destroy(runtimeVoiceBusySprite);
+            runtimeVoiceBusySprite = null;
+        }
+
+        if (runtimeVoiceMicTexture != null)
+        {
+            Destroy(runtimeVoiceMicTexture);
+            runtimeVoiceMicTexture = null;
+        }
+
+        if (runtimeVoiceStopTexture != null)
+        {
+            Destroy(runtimeVoiceStopTexture);
+            runtimeVoiceStopTexture = null;
+        }
+
+        if (runtimeVoiceBusyTexture != null)
+        {
+            Destroy(runtimeVoiceBusyTexture);
+            runtimeVoiceBusyTexture = null;
         }
     }
 }
