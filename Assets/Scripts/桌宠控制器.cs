@@ -1848,6 +1848,7 @@ public class 桌宠控制器 : MonoBehaviour
     private void OpenChatPanel()
     {
         EnsureRuntimeChatPanel();
+        PlayInitialState(transitionDuration);
         bool showGreetingBubble = false;
 
         if (chatHistory.Count == 0)

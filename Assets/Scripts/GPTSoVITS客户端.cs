@@ -291,15 +291,20 @@ public class GPTSoVITS客户端 : MonoBehaviour
         添加Json字段(builder, ref hasField, "media_type", "wav");
         添加Json布尔字段(builder, ref hasField, "streaming_mode", false);
 
-        if (!string.IsNullOrWhiteSpace(可用参考音频路径))
-        {
-            添加Json字段(builder, ref hasField, "ref_audio_path", 可用参考音频路径);
-        }
+        添加Json字段(
+            builder,
+            ref hasField,
+            "ref_audio_path",
+            string.IsNullOrWhiteSpace(可用参考音频路径) ? string.Empty : 可用参考音频路径);
 
         if (!string.IsNullOrWhiteSpace(有效参考文本))
         {
             添加Json字段(builder, ref hasField, "prompt_lang", 规范化语言代码(参考语言));
             添加Json字段(builder, ref hasField, "prompt_text", 有效参考文本);
+        }
+        else
+        {
+            添加Json字段(builder, ref hasField, "prompt_text", string.Empty);
         }
 
         builder.Append('}');
@@ -358,13 +363,38 @@ public class GPTSoVITS客户端 : MonoBehaviour
 
     private static string 读取错误响应(UnityWebRequest request)
     {
-        string body = request.downloadHandler != null ? request.downloadHandler.text : string.Empty;
-        if (!string.IsNullOrWhiteSpace(body))
+        if (request == null)
         {
-            return body.Trim();
+            return "request is null";
         }
 
-        return string.IsNullOrWhiteSpace(request.error) ? string.Empty : request.error.Trim();
+        string code = $"HTTP {request.responseCode}";
+        string error = string.IsNullOrWhiteSpace(request.error) ? "Unknown error" : request.error.Trim();
+        string contentType = request.GetResponseHeader("Content-Type") ?? string.Empty;
+
+        try
+        {
+            byte[] data = request.downloadHandler?.data;
+            if (data != null && data.Length > 0)
+            {
+                if (contentType.IndexOf("json", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    contentType.IndexOf("text", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    string body = Encoding.UTF8.GetString(data).Trim('\uFEFF', '\0', ' ', '\r', '\n', '\t');
+                    if (!string.IsNullOrWhiteSpace(body))
+                    {
+                        return $"{code} | {error} | {body}";
+                    }
+                }
+
+                return $"{code} | {error} | Content-Type={contentType} | {data.Length} bytes";
+            }
+        }
+        catch
+        {
+        }
+
+        return $"{code} | {error}";
     }
 
     private static string EscapeJson(string value)
