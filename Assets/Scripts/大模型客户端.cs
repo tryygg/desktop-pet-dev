@@ -1,12 +1,17 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.Serialization;
 using UnityEngine.Networking;
 using UnityEngine.UI;
+using Debug = UnityEngine.Debug;
+using Process = System.Diagnostics.Process;
+using ProcessStartInfo = System.Diagnostics.ProcessStartInfo;
 
 [DisallowMultipleComponent]
 public class 大模型客户端 : MonoBehaviour
@@ -62,6 +67,13 @@ public class 大模型客户端 : MonoBehaviour
     public string systemPrompt { get => 系统提示词; set => 系统提示词 = value; }
 
     private bool requestInFlight;
+    private sealed class CurlRequestResult
+    {
+        public bool success;
+        public long statusCode;
+        public string body;
+        public string error;
+    }
 
     [Serializable]
     private class ChatMessage
@@ -226,6 +238,7 @@ public class 大模型客户端 : MonoBehaviour
     private IEnumerator PostRequest(string message, Action<string> onSuccess, Action<string> onError, bool 播放桌宠反馈)
     {
         requestInFlight = true;
+        string requestUrl = BuildChatCompletionsUrl();
 
         ChatCompletionRequest payload = new ChatCompletionRequest
         {
@@ -247,7 +260,7 @@ public class 大模型客户端 : MonoBehaviour
 
         byte[] bodyRaw = Encoding.UTF8.GetBytes(JsonUtility.ToJson(payload));
 
-        using (UnityWebRequest request = new UnityWebRequest(apiUrl, UnityWebRequest.kHttpVerbPOST))
+        using (UnityWebRequest request = new UnityWebRequest(requestUrl, UnityWebRequest.kHttpVerbPOST))
         {
             request.uploadHandler = new UploadHandlerRaw(bodyRaw);
             request.downloadHandler = new DownloadHandlerBuffer();
@@ -259,10 +272,62 @@ public class 大模型客户端 : MonoBehaviour
 
             if (request.result != UnityWebRequest.Result.Success)
             {
+                if (ShouldUseCurlFallback(request))
+                {
+                    yield return PostRequestWithCurl(requestUrl, JsonUtility.ToJson(payload), result =>
+                    {
+                        if (result == null)
+                        {
+                            return;
+                        }
+
+                        if (result.success)
+                        {
+                            string curlContent = ExtractContentFromJson(result.body);
+                            if (!string.IsNullOrEmpty(curlContent))
+                            {
+                                SetResponseText(curlContent);
+                                if (播放桌宠反馈)
+                                {
+                                    PlayTalkingFeedback();
+                                }
+
+                                requestInFlight = false;
+                                onSuccess?.Invoke(curlContent);
+                                return;
+                            }
+                        }
+
+                        string curlError = ExtractErrorMessage(result.body);
+                        if (string.IsNullOrEmpty(curlError))
+                        {
+                            curlError = string.IsNullOrWhiteSpace(result.error)
+                                ? "网络连接失败。"
+                                : result.error;
+                        }
+
+                        SetResponseText(curlError);
+                        requestInFlight = false;
+                        if (播放桌宠反馈)
+                        {
+                            ResetPetFeedback();
+                        }
+
+                        onError?.Invoke(curlError);
+                    });
+
+                    if (!requestInFlight)
+                    {
+                        yield break;
+                    }
+                }
+
                 string errorMessage = ExtractErrorMessage(request.downloadHandler.text);
                 if (string.IsNullOrEmpty(errorMessage))
                 {
-                    errorMessage = "\u7f51\u7edc\u8fde\u63a5\u5931\u8d25\u3002";
+                    errorMessage = string.IsNullOrWhiteSpace(request.error)
+                        ? "\u7f51\u7edc\u8fde\u63a5\u5931\u8d25\u3002"
+                        : "Error: " + request.error;
                 }
 
                 SetResponseText(errorMessage);
@@ -300,6 +365,351 @@ public class 大模型客户端 : MonoBehaviour
             onSuccess?.Invoke(content);
             yield break;
         }
+    }
+
+    private static bool ShouldUseCurlFallback(UnityWebRequest request)
+    {
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+        if (request == null)
+        {
+            return false;
+        }
+
+        string error = request.error ?? string.Empty;
+        if (request.responseCode > 0)
+        {
+            return false;
+        }
+
+        return error.IndexOf("SSL", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               error.IndexOf("TLS", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               error.IndexOf("SecureChannel", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               error.IndexOf("transport stream", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               error.IndexOf("Authentication failed", StringComparison.OrdinalIgnoreCase) >= 0;
+#else
+        return false;
+#endif
+    }
+
+    private IEnumerator PostRequestWithCurl(string requestUrl, string payloadJson, Action<CurlRequestResult> onComplete)
+    {
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+        string tempJsonPath = Path.Combine(Path.GetTempPath(), "desktop-pet-gemini-request.json");
+        try
+        {
+            File.WriteAllText(tempJsonPath, payloadJson, new UTF8Encoding(false));
+        }
+        catch (Exception exception)
+        {
+            onComplete?.Invoke(new CurlRequestResult
+            {
+                success = false,
+                statusCode = 0,
+                body = string.Empty,
+                error = "写入临时请求文件失败: " + exception.Message
+            });
+            yield break;
+        }
+
+        Process process = null;
+        string stdout = string.Empty;
+        string stderr = string.Empty;
+        CurlRequestResult failureResult = null;
+        try
+        {
+            ProcessStartInfo startInfo = new ProcessStartInfo
+            {
+                FileName = "curl.exe",
+                Arguments =
+                    "-k -sS -X POST " +
+                    BuildCurlProxyArguments(requestUrl) +
+                    QuoteArgument(requestUrl) + " " +
+                    "-H " + QuoteArgument("Authorization: Bearer " + apiKey.Trim()) + " " +
+                    "-H " + QuoteArgument("Content-Type: application/json") + " " +
+                    "--data-binary " + QuoteArgument("@" + tempJsonPath) + " " +
+                    "-w " + QuoteArgument("\\n__HTTP_CODE__:%{http_code}"),
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            ApplyProxyEnvironment(startInfo);
+
+            process = new Process { StartInfo = startInfo };
+            process.Start();
+        }
+        catch (Exception exception)
+        {
+            failureResult = new CurlRequestResult
+            {
+                success = false,
+                statusCode = 0,
+                body = string.Empty,
+                error = "curl 回退失败: " + exception.Message
+            };
+        }
+
+        if (failureResult != null)
+        {
+            if (process != null)
+            {
+                process.Dispose();
+            }
+
+            try
+            {
+                if (File.Exists(tempJsonPath))
+                {
+                    File.Delete(tempJsonPath);
+                }
+            }
+            catch
+            {
+            }
+
+            onComplete?.Invoke(failureResult);
+            yield break;
+        }
+
+        while (process != null && !process.HasExited)
+        {
+            yield return null;
+        }
+
+        try
+        {
+            if (process != null)
+            {
+                stdout = process.StandardOutput.ReadToEnd();
+                stderr = process.StandardError.ReadToEnd();
+            }
+        }
+        catch (Exception exception)
+        {
+            onComplete?.Invoke(new CurlRequestResult
+            {
+                success = false,
+                statusCode = 0,
+                body = string.Empty,
+                error = "读取 curl 结果失败: " + exception.Message
+            });
+            yield break;
+        }
+        finally
+        {
+            if (process != null)
+            {
+                process.Dispose();
+            }
+
+            try
+            {
+                if (File.Exists(tempJsonPath))
+                {
+                    File.Delete(tempJsonPath);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        CurlRequestResult result = ParseCurlResult(stdout, stderr);
+        if (result.success)
+        {
+            onComplete?.Invoke(result);
+            yield break;
+        }
+        if (!result.success)
+        {
+            Debug.LogWarning("Gemini 请求已回退到 curl.exe，但仍失败。 " + (result.error ?? string.Empty));
+        }
+        else
+        {
+            Debug.LogWarning("Gemini 请求已回退到 curl.exe 并成功返回。");
+        }
+
+        onComplete?.Invoke(result);
+#else
+        onComplete?.Invoke(new CurlRequestResult
+        {
+            success = false,
+            statusCode = 0,
+            body = string.Empty,
+            error = "当前平台不支持 curl 回退。"
+        });
+        yield break;
+#endif
+    }
+
+    private static CurlRequestResult ParseCurlResult(string stdout, string stderr)
+    {
+        string output = stdout ?? string.Empty;
+        const string marker = "__HTTP_CODE__:";
+        int markerIndex = output.LastIndexOf(marker, StringComparison.Ordinal);
+        long statusCode = 0;
+        string body = output;
+        if (markerIndex >= 0)
+        {
+            string statusText = output.Substring(markerIndex + marker.Length).Trim();
+            long.TryParse(statusText, out statusCode);
+            body = output.Substring(0, markerIndex).Trim();
+        }
+
+        bool success = statusCode >= 200 && statusCode < 300;
+        string error = string.Empty;
+        if (!success)
+        {
+            error = !string.IsNullOrWhiteSpace(stderr)
+                ? stderr.Trim()
+                : (statusCode > 0 ? "HTTP " + statusCode : "curl 请求失败。");
+        }
+
+        return new CurlRequestResult
+        {
+            success = success,
+            statusCode = statusCode,
+            body = body,
+            error = error
+        };
+    }
+
+    private static string QuoteArgument(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return "\"\"";
+        }
+
+        return "\"" + value.Replace("\"", "\\\"") + "\"";
+    }
+
+    private static string BuildCurlProxyArguments(string requestUrl)
+    {
+        string proxy = GetProxyForRequest(requestUrl);
+        if (string.IsNullOrWhiteSpace(proxy))
+        {
+            return string.Empty;
+        }
+
+        return "--proxy " + QuoteArgument(proxy.Trim()) + " ";
+    }
+
+    private static void ApplyProxyEnvironment(ProcessStartInfo startInfo)
+    {
+        if (startInfo == null)
+        {
+            return;
+        }
+
+        CopyEnvironmentVariable(startInfo, "HTTPS_PROXY");
+        CopyEnvironmentVariable(startInfo, "HTTP_PROXY");
+        CopyEnvironmentVariable(startInfo, "ALL_PROXY");
+        CopyEnvironmentVariable(startInfo, "https_proxy");
+        CopyEnvironmentVariable(startInfo, "http_proxy");
+        CopyEnvironmentVariable(startInfo, "all_proxy");
+    }
+
+    private static void CopyEnvironmentVariable(ProcessStartInfo startInfo, string name)
+    {
+        string value = ReadEnvironmentVariable(name);
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            startInfo.EnvironmentVariables[name] = value.Trim();
+        }
+    }
+
+    private static string GetProxyForRequest(string requestUrl)
+    {
+        bool isHttps = !string.IsNullOrWhiteSpace(requestUrl) &&
+                       requestUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+
+        if (isHttps)
+        {
+            string httpsProxy = ReadEnvironmentVariable("HTTPS_PROXY", "https_proxy");
+            if (!string.IsNullOrWhiteSpace(httpsProxy))
+            {
+                return httpsProxy;
+            }
+        }
+
+        string httpProxy = ReadEnvironmentVariable("HTTP_PROXY", "http_proxy");
+        if (!string.IsNullOrWhiteSpace(httpProxy))
+        {
+            return httpProxy;
+        }
+
+        return ReadEnvironmentVariable("ALL_PROXY", "all_proxy");
+    }
+
+    private static string ReadEnvironmentVariable(params string[] names)
+    {
+        if (names == null)
+        {
+            return string.Empty;
+        }
+
+        for (int i = 0; i < names.Length; i++)
+        {
+            string name = names[i];
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            string processValue = Environment.GetEnvironmentVariable(name);
+            if (!string.IsNullOrWhiteSpace(processValue))
+            {
+                return processValue.Trim();
+            }
+
+            string userValue = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User);
+            if (!string.IsNullOrWhiteSpace(userValue))
+            {
+                return userValue.Trim();
+            }
+
+            string machineValue = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Machine);
+            if (!string.IsNullOrWhiteSpace(machineValue))
+            {
+                return machineValue.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private string BuildChatCompletionsUrl()
+    {
+        string configuredUrl = string.IsNullOrWhiteSpace(apiUrl) ? string.Empty : apiUrl.Trim();
+        if (string.IsNullOrWhiteSpace(configuredUrl))
+        {
+            return "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+        }
+
+        if (configuredUrl.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            return configuredUrl;
+        }
+
+        if (configuredUrl.EndsWith("/openai", StringComparison.OrdinalIgnoreCase))
+        {
+            return configuredUrl + "/chat/completions";
+        }
+
+        if (configuredUrl.EndsWith("/openai/", StringComparison.OrdinalIgnoreCase))
+        {
+            return configuredUrl + "chat/completions";
+        }
+
+        if (configuredUrl.EndsWith("/v1beta", StringComparison.OrdinalIgnoreCase) ||
+            configuredUrl.EndsWith("/v1beta/", StringComparison.OrdinalIgnoreCase))
+        {
+            return configuredUrl.TrimEnd('/') + "/openai/chat/completions";
+        }
+
+        return configuredUrl;
     }
 
     private void 尝试从密钥文件加载接口密钥()
@@ -507,7 +917,25 @@ public class 大模型客户端 : MonoBehaviour
             return string.Empty;
         }
 
-        ApiErrorEnvelope errorEnvelope = JsonUtility.FromJson<ApiErrorEnvelope>(json);
-        return errorEnvelope?.error?.message?.Trim() ?? string.Empty;
+        try
+        {
+            ApiErrorEnvelope errorEnvelope = JsonUtility.FromJson<ApiErrorEnvelope>(json);
+            if (!string.IsNullOrWhiteSpace(errorEnvelope?.error?.message))
+            {
+                return errorEnvelope.error.message.Trim();
+            }
+        }
+        catch
+        {
+        }
+
+        Match match = Regex.Match(json, "\"message\"\\s*:\\s*\"(?<message>(?:\\\\.|[^\"])*)\"", RegexOptions.IgnoreCase);
+        if (!match.Success)
+        {
+            return string.Empty;
+        }
+
+        string value = match.Groups["message"].Value;
+        return value.Replace("\\n", "\n").Replace("\\\"", "\"").Trim();
     }
 }
