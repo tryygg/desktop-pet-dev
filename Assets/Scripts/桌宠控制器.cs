@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.SceneManagement;
 using UnityEngine.Serialization;
 using UnityEngine.UI;
 
@@ -835,6 +836,13 @@ public partial class 桌宠控制器 : MonoBehaviour
             return;
         }
 
+        if (cursorOverMenu && hoveredMenuIndex == GetSceneSwitchMenuIndex())
+        {
+            CloseContextMenu();
+            SwitchToAlternatePetScene();
+            return;
+        }
+
         if (cursorOverMenu && hoveredMenuIndex == GetExitMenuIndex())
         {
             RequestQuit();
@@ -1449,7 +1457,7 @@ public partial class 桌宠控制器 : MonoBehaviour
 
     private Rect BuildMenuRect(Vector2 guiCursor)
     {
-        float menuHeight = menuPadding.y * 2f + menuHeaderHeight + (availableMenuStates.Count + 2) * menuItemHeight;
+        float menuHeight = menuPadding.y * 2f + menuHeaderHeight + (availableMenuStates.Count + 3) * menuItemHeight;
         float maxX = Mathf.Max(8f, windowController.WindowSize.x - menuWidth - 8f);
         float maxY = Mathf.Max(8f, windowController.WindowSize.y - menuHeight - 8f);
 
@@ -1463,9 +1471,14 @@ public partial class 桌宠控制器 : MonoBehaviour
         return availableMenuStates.Count;
     }
 
-    private int GetExitMenuIndex()
+    private int GetSceneSwitchMenuIndex()
     {
         return availableMenuStates.Count + 1;
+    }
+
+    private int GetExitMenuIndex()
+    {
+        return availableMenuStates.Count + 2;
     }
 
     private int GetMenuIndexAt(Vector2 guiPosition)
@@ -1481,6 +1494,11 @@ public partial class 桌宠控制器 : MonoBehaviour
         if (GetChatItemRect().Contains(guiPosition))
         {
             return GetChatMenuIndex();
+        }
+
+        if (GetSceneSwitchItemRect().Contains(guiPosition))
+        {
+            return GetSceneSwitchMenuIndex();
         }
 
         if (GetExitItemRect().Contains(guiPosition))
@@ -1679,7 +1697,7 @@ public partial class 桌宠控制器 : MonoBehaviour
             ? "\u6211\u8FD9\u6B21\u6CA1\u7EC4\u7EC7\u597D\u56DE\u7B54\uFF0C\u4F60\u518D\u8DDF\u6211\u8BF4\u4E00\u904D\u5427\u3002"
             : reply.Trim();
 
-        AppendChatLine("\u5c0f\u6d63\u718a", finalReply);
+        AppendChatLine(GetCurrentPetDisplayName(), finalReply);
         UpdateRuntimeChatVisuals();
         ExpandWindowRegionForChatUI();
 
@@ -1748,7 +1766,7 @@ public partial class 桌宠控制器 : MonoBehaviour
 
         if (normalizedMessage.Contains("\u540d\u5b57"))
         {
-            return "\u6211\u662f\u4f60\u7684\u684c\u5ba0\u5c0f\u6d63\u718a\uff0c\u968f\u65f6\u53ef\u4ee5\u966a\u4f60\u804a\u804a\u5929\u3002";
+            return "\u6211\u662f\u4f60\u7684\u684c\u5ba0" + GetCurrentPetDisplayName() + "\uff0c\u968f\u65f6\u53ef\u4ee5\u966a\u4f60\u804a\u804a\u5929\u3002";
         }
 
         if (localChatReplies != null && localChatReplies.Length > 0)
@@ -1926,6 +1944,14 @@ public partial class 桌宠控制器 : MonoBehaviour
             runtimeChatMenuBackground.color = GetRuntimeMenuColor(chatColor);
         }
 
+        if (runtimeSceneSwitchBackground != null)
+        {
+            Color sceneSwitchColor = hoveredMenuIndex == GetSceneSwitchMenuIndex()
+                ? menuHoverColor
+                : menuItemColor;
+            runtimeSceneSwitchBackground.color = GetRuntimeMenuColor(sceneSwitchColor);
+        }
+
         if (runtimeExitBackground != null)
         {
             Color exitColor = hoveredMenuIndex == GetExitMenuIndex()
@@ -1933,6 +1959,73 @@ public partial class 桌宠控制器 : MonoBehaviour
                 : new Color(0.45f, 0.2f, 0.2f, 1f);
             runtimeExitBackground.color = GetRuntimeMenuColor(exitColor);
         }
+    }
+
+    private string GetCurrentPetDisplayName()
+    {
+        string sceneName = SceneManager.GetActiveScene().name;
+        if (!string.IsNullOrWhiteSpace(sceneName) && sceneName != "SampleScene")
+        {
+            return sceneName;
+        }
+
+        if (visualRoot != null && !string.IsNullOrWhiteSpace(visualRoot.name))
+        {
+            return visualRoot.name;
+        }
+
+        if (characterAnimator != null && !string.IsNullOrWhiteSpace(characterAnimator.gameObject.name))
+        {
+            return characterAnimator.gameObject.name;
+        }
+
+        return "\u684c\u5ba0";
+    }
+
+    private string GetAlternatePetSceneName()
+    {
+        string currentSceneName = SceneManager.GetActiveScene().name;
+        if (currentSceneName == "\u722A\u722A")
+        {
+            return "\u82cf\u82cf";
+        }
+
+        if (currentSceneName == "\u82cf\u82cf")
+        {
+            return "\u722A\u722A";
+        }
+
+        return "\u722A\u722A";
+    }
+
+    private string GetSceneSwitchMenuLabel()
+    {
+        return "\u5207\u6362\u5230" + GetAlternatePetSceneName();
+    }
+
+    private void SwitchToAlternatePetScene()
+    {
+        string targetSceneName = GetAlternatePetSceneName();
+        if (string.IsNullOrWhiteSpace(targetSceneName) || targetSceneName == SceneManager.GetActiveScene().name)
+        {
+            return;
+        }
+
+        if (Gemini语音输入客户端引用 != null && Gemini语音输入客户端引用.正在录音)
+        {
+            Gemini语音输入客户端引用.取消录音();
+        }
+
+        if (gptSoVITSClient != null)
+        {
+            AudioSource ttsAudioSource = gptSoVITSClient.GetComponent<AudioSource>();
+            if (ttsAudioSource != null && ttsAudioSource.isPlaying)
+            {
+                ttsAudioSource.Stop();
+            }
+        }
+
+        SceneManager.LoadScene(targetSceneName);
     }
 
 

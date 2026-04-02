@@ -65,6 +65,7 @@ public partial class 桌宠控制器
     private string cachedChatHistoryText = string.Empty;
     private bool chatHistoryDirty = true;
     private Image runtimeChatMenuBackground;
+    private Image runtimeSceneSwitchBackground;
     private Image runtimeExitBackground;
     private Image runtimeChatPanelBackground;
     private Image runtimeChatHistoryPanelBackground;
@@ -126,6 +127,11 @@ public partial class 桌宠控制器
     private Rect GetExitItemRect()
     {
         return GetMenuItemRect(GetExitMenuIndex());
+    }
+
+    private Rect GetSceneSwitchItemRect()
+    {
+        return GetMenuItemRect(GetSceneSwitchMenuIndex());
     }
 
     private Rect GetChatItemRect()
@@ -431,7 +437,7 @@ public partial class 桌宠控制器
 
         if (chatHistory.Count == 0)
         {
-            AppendChatLine("小浣熊", defaultGreeting);
+            AppendChatLine(GetCurrentPetDisplayName(), defaultGreeting);
             showGreetingBubble = true;
         }
 
@@ -1427,6 +1433,7 @@ public partial class 桌宠控制器
         HideUnusedMenuItems();
         runtimeMenuItemBackgrounds.Clear();
         runtimeChatMenuBackground = null;
+        runtimeSceneSwitchBackground = null;
         runtimeExitBackground = null;
 
         for (int i = 0; i < availableMenuStates.Count; i++)
@@ -1436,6 +1443,7 @@ public partial class 桌宠控制器
         }
 
         runtimeChatMenuBackground = CreateOrUpdateRuntimeMenuItem("Chat", ChatMenuLabel, GetChatMenuIndex());
+        runtimeSceneSwitchBackground = CreateOrUpdateRuntimeMenuItem("SceneSwitch", GetSceneSwitchMenuLabel(), GetSceneSwitchMenuIndex());
         runtimeExitBackground = CreateOrUpdateRuntimeMenuItem("Exit", ExitMenuLabel, GetExitMenuIndex());
         Text exitLabel = runtimeExitBackground.GetComponentInChildren<Text>();
         if (exitLabel != null)
@@ -1478,6 +1486,10 @@ public partial class 桌宠控制器
         {
             localRect = GetChatItemRect();
         }
+        else if (index == GetSceneSwitchMenuIndex())
+        {
+            localRect = GetSceneSwitchItemRect();
+        }
         else if (index == GetExitMenuIndex())
         {
             localRect = GetExitItemRect();
@@ -1505,6 +1517,7 @@ public partial class 桌宠控制器
     {
         runtimeMenuItemBackgrounds.Clear();
         runtimeChatMenuBackground = null;
+        runtimeSceneSwitchBackground = null;
         runtimeExitBackground = null;
     }
 
